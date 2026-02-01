@@ -28,6 +28,14 @@ public final class NT {
         return inst.getBooleanTopic(topic).subscribe(defaultVal);
     }
 
+    public static DoubleArraySubscriber subDoubleArray(String topic, double[] defaultVal) {
+        return inst.getDoubleArrayTopic(topic).subscribe(defaultVal);
+    }
+
+    public static StringSubscriber subString(String topic, String defaultVal) {
+        return inst.getStringTopic(topic).subscribe(defaultVal);
+    }
+
     public static BooleanPublisher pubBool(String topic) {
         return inst.getBooleanTopic(topic).publish();
     }
