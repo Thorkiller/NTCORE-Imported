@@ -44,6 +44,10 @@ public final class NT {
         return inst.getStringTopic(topic).publish();
     }
 
+    public static DoublePublisher pubDouble(String topic) {
+        return inst.getDoubleTopic(topic).publish();
+    }
+
     public static void onConnectionChange(Consumer<Boolean> cb) {
         inst.addConnectionListener(true, event -> {
             boolean connected = event.is(NetworkTableEvent.Kind.kConnected);
