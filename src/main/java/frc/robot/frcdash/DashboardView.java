@@ -10,8 +10,8 @@ import edu.wpi.first.networktables.StringSubscriber;
 import edu.wpi.first.networktables.StructSubscriber;
 import edu.wpi.first.networktables.TimestampedObject;
 import edu.wpi.first.math.geometry.Pose2d;
-import frc.robot.frcdash.ui.BooleanTopicTile;
 import frc.robot.frcdash.ui.DoubleTopicTile;
+import frc.robot.frcdash.ui.StringTopicTile;
 import javafx.animation.AnimationTimer;
 import javafx.animation.ScaleTransition;
 import javafx.animation.SequentialTransition;
@@ -96,13 +96,13 @@ public final class DashboardView {
     private final DoublePublisher shooterTargetCmd = NT.pubDouble("/Dashboard/ShooterTargetRPM");
     private final BooleanPublisher hoodAngleCmd = NT.pubBool("/Dashboard/HoodAngleDeg");
     private final DoublePublisher hoodSetpointCmd = NT.pubDouble("/Dashboard/HoodSetpointDeg");
-    private final BooleanPublisher spindexerCmd = NT.pubBool("/ Dashboard/Spindexer");
+    private final BooleanPublisher spindexerCmd = NT.pubBool("/Dashboard/Spindexer");
     private final BooleanPublisher spindexerReverseCmd = NT.pubBool("/Dashboard/SpindexerReverse");
 
     // Editable tiles (robot -> dashboard)
     private DoubleTopicTile batteryTile;
     private DoubleTopicTile gyroTile;
-    private BooleanTopicTile enabledTile;
+    private StringTopicTile enabledTile;
     private StackPane fieldTile;
     private StackPane matchTimerTile;
     private Button zeroGyroTile;
@@ -359,13 +359,13 @@ public final class DashboardView {
             v -> String.format("%.1f°", v)
         );
 
-        enabledTile = new BooleanTopicTile(
+        enabledTile = new StringTopicTile(
             inst,
             "Robot State",
             "Topic: /Dashboard/Enabled",
             "/Dashboard/Enabled",
-            false,
-            b -> b ? "ENABLED" : "DISABLED"
+            "",
+            v -> v == null || v.isBlank() ? "--" : v
         );
 
         fieldTile = buildFieldTile();
