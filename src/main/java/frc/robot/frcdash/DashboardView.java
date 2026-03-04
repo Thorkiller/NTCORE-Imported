@@ -96,7 +96,7 @@ public final class DashboardView {
     private final DoublePublisher shooterTargetCmd = NT.pubDouble("/Dashboard/ShooterTargetRPM");
     private final BooleanPublisher hoodAngleCmd = NT.pubBool("/Dashboard/HoodAngleDeg");
     private final DoublePublisher hoodSetpointCmd = NT.pubDouble("/Dashboard/HoodSetpointDeg");
-    private final BooleanPublisher spindexerCmd = NT.pubBool("/Dashboard/Spindexer");
+    private final BooleanPublisher spindexerCmd = NT.pubBool("/ Dashboard/Spindexer");
     private final BooleanPublisher spindexerReverseCmd = NT.pubBool("/Dashboard/SpindexerReverse");
 
     // Editable tiles (robot -> dashboard)
