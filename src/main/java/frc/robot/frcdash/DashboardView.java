@@ -92,16 +92,17 @@ public final class DashboardView {
     private final BooleanPublisher shootCmd = NT.pubBool("/Dashboard/Shoot");
     private final BooleanPublisher intakeCmd = NT.pubBool("/Dashboard/Intake");
     private final BooleanPublisher intakeInCmd = NT.pubBool("/Dashboard/IntakeIn");
-    private final BooleanPublisher hasPieceCmd = NT.pubBool("/Dashboard/HasPiece");
     private final DoublePublisher shooterTargetCmd = NT.pubDouble("/Dashboard/ShooterTargetRPM");
     private final BooleanPublisher hoodAngleCmd = NT.pubBool("/Dashboard/HoodAngleDeg");
     private final DoublePublisher hoodSetpointCmd = NT.pubDouble("/Dashboard/HoodSetpointDeg");
     private final BooleanPublisher spindexerCmd = NT.pubBool("/Dashboard/Spindexer");
     private final BooleanPublisher spindexerReverseCmd = NT.pubBool("/Dashboard/SpindexerReverse");
+    private final BooleanPublisher funnlingCmd = NT.pubBool("/Dashboard/Funnling");
+    private final BooleanPublisher manualCmd = NT.pubBool("/Dashboard/Manual");
+    private final BooleanPublisher confirmCmd = NT.pubBool("/Dashboard/Confirm");
 
     // Editable tiles (robot -> dashboard)
     private DoubleTopicTile batteryTile;
-    private DoubleTopicTile gyroTile;
     private StringTopicTile enabledTile;
     private StackPane fieldTile;
     private StackPane matchTimerTile;
@@ -110,9 +111,11 @@ public final class DashboardView {
     private Button shootTile;
     private Button intakeTile;
     private Button intakeInTile;
-    private Button hasPieceTile;
     private Button spindexerReverseTile;
     private Button hoodDownTile;
+    private Button confirmTile;
+    private ToggleButton funnlingTile;
+    private ToggleButton manualTile;
     private StackPane shooterTile;
     private StackPane boostTile;
     private Slider shooterBoostSlider;
@@ -121,6 +124,7 @@ public final class DashboardView {
     private final Label shooterActualLabel = new Label("Actual: -- RPM");
     private final Label shooterTargetLabel = new Label("Target: -- RPM");
     private final Label matchTimerLabel = new Label("02:15");
+    private final Label canShootLabel = new Label("CAN SHOOT: --");
     private final Label hubStatusLabel = new Label("HUB: --");
     private final Label hubCountdownLabel = new Label("--");
     private final Label hubAllianceLabel = new Label("--");
@@ -128,8 +132,8 @@ public final class DashboardView {
 
     private final DoubleSubscriber matchTimeSub = NT.subDouble("/AdvantageKit/RealOutputs/MatchTime", 0.0);
     private final StringSubscriber autoWinnerSub = NT.subString("/AdvantageKit/RealOutputs/AutoWinner", "");
-    private final DoubleSubscriber shooterRpmSub = NT.subDouble("/Dashboard/ShooterRPM", 0.0);
-    private final DoubleSubscriber shooterTargetSub = NT.subDouble("/Dashboard/ShooterTargetRPM", 0.0);
+    private final DoubleSubscriber shooterRpmSub = NT.subDouble("/AdvantageKit/Shooter/ShooterRPM", 0.0);
+    private final DoubleSubscriber shooterTargetSub = NT.subDouble("/AdvantageKit/Shooter/TargetRPM", 0.0);
     private StructSubscriber<Pose2d> poseSub;
     private DoubleArraySubscriber poseArraySub;
     private StringSubscriber allianceSub;
@@ -172,7 +176,6 @@ public final class DashboardView {
         new AnimationTimer() {
             @Override public void handle(long now) {
                 if (batteryTile != null) batteryTile.update();
-                if (gyroTile != null) gyroTile.update();
                 if (enabledTile != null) enabledTile.update();
                 if (fieldTile != null) updateFieldPose();
                 updateMatchTimer();
@@ -345,25 +348,15 @@ public final class DashboardView {
             inst,
             "Battery",
             "Topic: /Dashboard/BatteryVoltage",
-            "/Dashboard/BatteryVoltage",
+            "/AdvantageKit/SystemStats/BatteryVoltage",
             0.0,
             v -> String.format("%.2f V", v)
         );
-
-        gyroTile = new DoubleTopicTile(
-            inst,
-            "Gyro",
-            "Topic: /Dashboard/GyroDeg",
-            "/Dashboard/GyroDeg",
-            0.0,
-            v -> String.format("%.1f°", v)
-        );
-
         enabledTile = new StringTopicTile(
             inst,
             "Robot State",
             "Topic: /Dashboard/Enabled",
-            "/Dashboard/Enabled",
+            "/AdvantageKit/Superstructure/CurrentState",
             "",
             v -> v == null || v.isBlank() ? "--" : v
         );
@@ -390,11 +383,6 @@ public final class DashboardView {
             intakeCmd,
             "Intake pressed (200ms pulse)"
         );
-        hasPieceTile = buildActionTile(
-            "Has Piece",
-            hasPieceCmd,
-            "HasPiece pressed (200ms pulse)"
-        );
         shooterTile = buildShooterTile();
         boostTile = buildBoostTile();
         spindexerReverseTile = buildActionTile(
@@ -407,6 +395,11 @@ public final class DashboardView {
             hoodAngleCmd,
             "Hood down pressed (200ms pulse)"
         );
+        confirmTile = buildActionTile(
+            "Confirm",
+            confirmCmd,
+            "Confirm pressed (200ms pulse)"
+        );
         intakeInTile = buildActionTile("Intake In", () -> {
             intakeInCmd.set(true);
             appendLog("IntakeIn pressed (200ms pulse)");
@@ -415,22 +408,31 @@ public final class DashboardView {
             pt.setOnFinished(ev -> intakeInCmd.set(false));
             pt.play();
         });
+        funnlingTile = buildToggleActionTile(
+            "Funnling",
+            funnlingCmd,
+            "Funnling toggled"
+        );
+        manualTile = buildToggleActionTile(
+            "Manual",
+            manualCmd,
+            "Manual toggled"
+        );
 
         loadLayout();
 
         Pane pane = new Pane();
-        pane.setMinHeight(980);
+        pane.setMinHeight(1120);
         Rectangle clip = new Rectangle();
         clip.widthProperty().bind(pane.widthProperty());
         clip.heightProperty().bind(pane.heightProperty());
         pane.setClip(clip);
         pane.getChildren().addAll(
-            batteryTile, gyroTile, enabledTile, fieldTile, matchTimerTile,
-            zeroGyroTile, driveModeTile, shootTile, intakeTile, hasPieceTile, shooterTile, boostTile,
-            spindexerReverseTile, hoodDownTile, intakeInTile);
+            batteryTile, enabledTile, fieldTile, matchTimerTile,
+            zeroGyroTile, driveModeTile, shootTile, intakeTile, shooterTile, boostTile,
+            spindexerReverseTile, hoodDownTile, confirmTile, intakeInTile, funnlingTile, manualTile);
 
         enableDragAndResize(batteryTile, "battery", 0, 0, 380, 160);
-        enableDragAndResize(gyroTile, "gyro", 420, 0, 380, 160);
         enableDragAndResize(enabledTile, "enabled", 0, 190, 380, 160);
         enableDragAndResize(fieldTile, "field", 420, 190, 520, 300);
         enableDragAndResize(matchTimerTile, "matchTimer", 0, 360, 240, 120);
@@ -438,12 +440,14 @@ public final class DashboardView {
         enableDragAndResize(driveModeTile, "driveMode", 520, 360, 240, 120);
         enableDragAndResize(shootTile, "shoot", 260, 500, 240, 120);
         enableDragAndResize(intakeTile, "intake", 520, 500, 240, 120);
-        enableDragAndResize(hasPieceTile, "hasPiece", 0, 500, 240, 120);
         enableDragAndResize(shooterTile, "shooter", 0, 640, 520, 160);
         enableDragAndResize(boostTile, "boost", 560, 640, 340, 160);
         enableDragAndResize(spindexerReverseTile, "spindexerReverse", 0, 820, 240, 120);
         enableDragAndResize(hoodDownTile, "hoodDown", 260, 820, 240, 120);
-        enableDragAndResize(intakeInTile, "intakeIn", 520, 820, 240, 120);
+        enableDragAndResize(confirmTile, "confirm", 520, 820, 240, 120);
+        enableDragAndResize(intakeInTile, "intakeIn", 0, 960, 240, 120);
+        enableDragAndResize(funnlingTile, "funnling", 780, 500, 240, 120);
+        enableDragAndResize(manualTile, "manual", 780, 820, 240, 120);
 
         StackPane wrapper = new StackPane(pane);
         StackPane.setMargin(pane, new Insets(0, 0, 0, 12));
@@ -590,14 +594,16 @@ public final class DashboardView {
     }
 
     private StackPane buildMatchTimerTile() {
-        matchTimerLabel.setStyle("""
-            -fx-text-fill: #f8fafc;
-            -fx-font-weight: 900;
-            -fx-font-size: 36;
-        """);
+        setMatchTimerColor("#f8fafc");
 
         Label title = new Label("Match Timer");
         title.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 700;");
+
+        canShootLabel.setStyle("""
+            -fx-text-fill: #94a3b8;
+            -fx-font-weight: 800;
+            -fx-font-size: 12;
+        """);
 
         hubStatusLabel.setStyle("""
             -fx-text-fill: #f8fafc;
@@ -617,7 +623,7 @@ public final class DashboardView {
             -fx-font-size: 22;
         """);
 
-        VBox content = new VBox(6, title, matchTimerLabel, hubStatusLabel, hubAllianceLabel, hubCountdownLabel);
+        VBox content = new VBox(6, title, matchTimerLabel, canShootLabel, hubStatusLabel, hubAllianceLabel, hubCountdownLabel);
         content.setAlignment(Pos.CENTER);
 
         StackPane tile = new StackPane(content);
@@ -656,7 +662,56 @@ public final class DashboardView {
         return tile;
     }
 
-    private void playClickAnimation(Button tile) {
+    private ToggleButton buildToggleActionTile(
+        String titleText,
+        BooleanPublisher publisher,
+        String logMessage
+    ) {
+        ToggleButton tile = new ToggleButton(titleText);
+        tile.setMaxWidth(Double.MAX_VALUE);
+        tile.setMaxHeight(Double.MAX_VALUE);
+        tile.setPadding(new Insets(10));
+        tile.setCursor(Cursor.HAND);
+        tile.setSelected(false);
+        updateToggleTileStyle(tile, false);
+        publisher.set(false);
+
+        tile.setOnAction(e -> {
+            playClickAnimation(tile);
+            boolean selected = tile.isSelected();
+            publisher.set(selected);
+            updateToggleTileStyle(tile, selected);
+            appendLog(logMessage + (selected ? " true" : " false"));
+        });
+
+        return tile;
+    }
+
+    private void updateToggleTileStyle(ToggleButton tile, boolean selected) {
+        if (selected) {
+            tile.setStyle("""
+                -fx-background-color: #16a34a;
+                -fx-background-radius: 16;
+                -fx-border-color: #22c55e;
+                -fx-border-radius: 16;
+                -fx-text-fill: #f8fafc;
+                -fx-font-weight: 800;
+                -fx-font-size: 16;
+            """);
+        } else {
+            tile.setStyle("""
+                -fx-background-color: #0f172a;
+                -fx-background-radius: 16;
+                -fx-border-color: #1f2a44;
+                -fx-border-radius: 16;
+                -fx-text-fill: #f8fafc;
+                -fx-font-weight: 700;
+                -fx-font-size: 16;
+            """);
+        }
+    }
+
+    private void playClickAnimation(ButtonBase tile) {
         ScaleTransition down = new ScaleTransition(Duration.millis(80), tile);
         down.setToX(0.96);
         down.setToY(0.96);
@@ -674,12 +729,16 @@ public final class DashboardView {
         double seconds = matchTimeSub.get();
         if (seconds < 0) seconds = 0;
         matchTimerLabel.setText(formatSecondsFloor(seconds));
+        ShootWindow shootWindow = getShootWindow(seconds);
+        updateMatchTimerStyle(shootWindow);
+        updateCanShootLabel(shootWindow);
     }
 
     private void updateHubTimer() {
         if (matchTimeSub == null || allianceSub == null) return;
         double remaining = matchTimeSub.get();
         if (remaining <= 0) return;
+        ShootWindow shootWindow = getShootWindow(remaining);
 
         double elapsed = MATCH_SECONDS - remaining;
         if (elapsed < 0) elapsed = 0;
@@ -689,7 +748,7 @@ public final class DashboardView {
         boolean isRed = alliance.equalsIgnoreCase("Red");
 
         if (elapsed < AUTO_SECONDS) {
-            setHubStatus("BOTH ACTIVE", "--", "--", "#94a3b8");
+            setHubStatus("BOTH ACTIVE", "--", "--", getPreShootColor(shootWindow, "#94a3b8"));
             return;
         }
 
@@ -702,7 +761,7 @@ public final class DashboardView {
                 "BOTH ACTIVE",
                 "--",
                 formatSecondsFloor(TRANSITION_SECONDS - teleopElapsed),
-                "#94a3b8"
+                getPreShootColor(shootWindow, "#94a3b8")
             );
             return;
         }
@@ -718,7 +777,12 @@ public final class DashboardView {
             boolean winnerRed = winner.equalsIgnoreCase("Red");
 
             if (!(winnerBlue || winnerRed) || !(isBlue || isRed)) {
-                setHubStatus("HUB: ?", "--", formatSecondsFloor(shiftTimeLeft), "#94a3b8");
+                setHubStatus(
+                    "HUB: ?",
+                    "--",
+                    formatSecondsFloor(shiftTimeLeft),
+                    getPreShootColor(shootWindow, "#94a3b8")
+                );
                 return;
             }
 
@@ -737,7 +801,12 @@ public final class DashboardView {
             }
 
             String activeTeam = activeBlue ? "BLUE ACTIVE" : "RED ACTIVE";
-            setHubStatus(status, activeTeam, formatSecondsFloor(shiftTimeLeft), color);
+            setHubStatus(
+                status,
+                activeTeam,
+                formatSecondsFloor(shiftTimeLeft),
+                getPreShootColor(shootWindow, color)
+            );
             return;
         }
 
@@ -747,12 +816,12 @@ public final class DashboardView {
                 "BOTH ACTIVE",
                 "BOTH ACTIVE",
                 formatSecondsFloor(ENDGAME_SECONDS - endgameElapsed),
-                "#94a3b8"
+                getPreShootColor(shootWindow, "#94a3b8")
             );
             return;
         }
 
-        setHubStatus("BOTH ACTIVE", "BOTH ACTIVE", "--", "#94a3b8");
+        setHubStatus("BOTH ACTIVE", "BOTH ACTIVE", "--", getPreShootColor(shootWindow, "#94a3b8"));
     }
 
     private void setHubStatus(String status, String team, String timer, String color) {
@@ -764,6 +833,125 @@ public final class DashboardView {
             -fx-font-weight: 900;
             -fx-font-size: 28;
         """, color));
+    }
+
+    private static final class ShootWindow {
+        private final boolean known;
+        private final boolean canShoot;
+        private final double secondsUntilCanShoot;
+
+        private ShootWindow(boolean known, boolean canShoot, double secondsUntilCanShoot) {
+            this.known = known;
+            this.canShoot = canShoot;
+            this.secondsUntilCanShoot = secondsUntilCanShoot;
+        }
+    }
+
+    private ShootWindow getShootWindow(double remaining) {
+        if (remaining <= 0) {
+            return new ShootWindow(true, false, Double.POSITIVE_INFINITY);
+        }
+        if (allianceSub == null) {
+            return new ShootWindow(false, false, Double.POSITIVE_INFINITY);
+        }
+
+        String alliance = allianceSub.get().trim();
+        boolean isBlue = alliance.equalsIgnoreCase("Blue");
+        boolean isRed = alliance.equalsIgnoreCase("Red");
+        if (!isBlue && !isRed) {
+            return new ShootWindow(false, false, Double.POSITIVE_INFINITY);
+        }
+
+        double elapsed = MATCH_SECONDS - remaining;
+        if (elapsed < 0) elapsed = 0;
+
+        if (elapsed < AUTO_SECONDS) {
+            return new ShootWindow(true, true, 0.0);
+        }
+
+        double teleopRemaining = remaining;
+        if (teleopRemaining > TELEOP_SECONDS) teleopRemaining = TELEOP_SECONDS;
+        if (teleopRemaining < 0) teleopRemaining = 0;
+        double teleopElapsed = TELEOP_SECONDS - teleopRemaining;
+        if (teleopElapsed < TRANSITION_SECONDS) {
+            return new ShootWindow(true, true, 0.0);
+        }
+
+        double shiftsElapsed = teleopElapsed - TRANSITION_SECONDS;
+        double shiftsTotal = SHIFT_SECONDS * SHIFT_COUNT;
+        if (shiftsElapsed < shiftsTotal) {
+            int shiftIndex = (int) Math.floor(shiftsElapsed / SHIFT_SECONDS);
+            double shiftTimeLeft = SHIFT_SECONDS - (shiftsElapsed % SHIFT_SECONDS);
+
+            String winner = autoWinnerSub != null ? autoWinnerSub.get().trim() : "";
+            boolean winnerBlue = winner.equalsIgnoreCase("Blue");
+            boolean winnerRed = winner.equalsIgnoreCase("Red");
+
+            if (!(winnerBlue || winnerRed)) {
+                return new ShootWindow(false, false, Double.POSITIVE_INFINITY);
+            }
+
+            boolean shift1ActiveBlue = winnerRed;
+            boolean activeBlue = (shiftIndex % 2 == 0) ? shift1ActiveBlue : !shift1ActiveBlue;
+            boolean isActive = isBlue ? activeBlue : !activeBlue;
+            if (isActive) {
+                return new ShootWindow(true, true, 0.0);
+            }
+            return new ShootWindow(true, false, shiftTimeLeft);
+        }
+
+        double endgameElapsed = shiftsElapsed - shiftsTotal;
+        if (endgameElapsed < ENDGAME_SECONDS) {
+            return new ShootWindow(true, true, 0.0);
+        }
+
+        return new ShootWindow(true, true, 0.0);
+    }
+
+    private void setMatchTimerColor(String color) {
+        matchTimerLabel.setStyle(String.format("""
+            -fx-text-fill: %s;
+            -fx-font-weight: 900;
+            -fx-font-size: 36;
+        """, color));
+    }
+
+    private void updateMatchTimerStyle(ShootWindow shootWindow) {
+        String color = "#f8fafc";
+        setMatchTimerColor(getPreShootColor(shootWindow, color));
+    }
+
+    private void updateCanShootLabel(ShootWindow shootWindow) {
+        if (!shootWindow.known) {
+            canShootLabel.setText("CAN SHOOT: --");
+            canShootLabel.setStyle("""
+                -fx-text-fill: #94a3b8;
+                -fx-font-weight: 800;
+                -fx-font-size: 12;
+            """);
+            return;
+        }
+
+        boolean canShoot = shootWindow.canShoot;
+        canShootLabel.setText(canShoot ? "CAN SHOOT" : "CANNOT SHOOT");
+        canShootLabel.setStyle(String.format("""
+            -fx-text-fill: %s;
+            -fx-font-weight: 800;
+            -fx-font-size: 12;
+        """, canShoot ? "#22c55e" : "#ef4444"));
+    }
+
+    private String getPreShootColor(ShootWindow shootWindow, String fallback) {
+        if (shootWindow.known && !shootWindow.canShoot && shootWindow.secondsUntilCanShoot > 0.0) {
+            if (shootWindow.secondsUntilCanShoot <= 10.0) {
+                return "#22c55e";
+            }
+            if (shootWindow.secondsUntilCanShoot <= 15.0) {
+                boolean flashOn = (System.currentTimeMillis() / 300) % 2 == 0;
+                return flashOn ? "#22c55e" : fallback;
+            }
+        }
+        return fallback;
     }
 
     private void updateShooterStatus() {
@@ -1570,3 +1758,4 @@ public final class DashboardView {
         }
     }
 }
+
