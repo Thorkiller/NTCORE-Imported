@@ -10,6 +10,7 @@ import edu.wpi.first.networktables.StringSubscriber;
 import edu.wpi.first.networktables.StructSubscriber;
 import edu.wpi.first.networktables.TimestampedObject;
 import edu.wpi.first.math.geometry.Pose2d;
+import frc.robot.frcdash.ui.BooleanTopicTile;
 import frc.robot.frcdash.ui.DoubleTopicTile;
 import frc.robot.frcdash.ui.StringTopicTile;
 import javafx.animation.AnimationTimer;
@@ -104,6 +105,7 @@ public final class DashboardView {
     // Editable tiles (robot -> dashboard)
     private DoubleTopicTile batteryTile;
     private StringTopicTile enabledTile;
+    private BooleanTopicTile visionTile;
     private StackPane fieldTile;
     private StackPane matchTimerTile;
     private Button zeroGyroTile;
@@ -177,6 +179,7 @@ public final class DashboardView {
             @Override public void handle(long now) {
                 if (batteryTile != null) batteryTile.update();
                 if (enabledTile != null) enabledTile.update();
+                if (visionTile != null) visionTile.update();
                 if (fieldTile != null) updateFieldPose();
                 updateMatchTimer();
                 updateHubTimer();
@@ -360,6 +363,14 @@ public final class DashboardView {
             "",
             v -> v == null || v.isBlank() ? "--" : v
         );
+        visionTile = new BooleanTopicTile(
+            inst,
+            "Vision",
+            "Topic: /Vision/HasTarget",
+            "/Vision/HasTarget",
+            false,
+            v -> v ? "Target is seen" : "Target is not seen"
+        );
 
         fieldTile = buildFieldTile();
         matchTimerTile = buildMatchTimerTile();
@@ -428,26 +439,27 @@ public final class DashboardView {
         clip.heightProperty().bind(pane.heightProperty());
         pane.setClip(clip);
         pane.getChildren().addAll(
-            batteryTile, enabledTile, fieldTile, matchTimerTile,
+            batteryTile, enabledTile, visionTile, fieldTile, matchTimerTile,
             zeroGyroTile, driveModeTile, shootTile, intakeTile, shooterTile, boostTile,
             spindexerReverseTile, hoodDownTile, confirmTile, intakeInTile, funnlingTile, manualTile);
 
         enableDragAndResize(batteryTile, "battery", 0, 0, 380, 160);
         enableDragAndResize(enabledTile, "enabled", 0, 190, 380, 160);
+        enableDragAndResize(visionTile, "vision", 0, 360, 380, 120);
         enableDragAndResize(fieldTile, "field", 420, 190, 520, 300);
-        enableDragAndResize(matchTimerTile, "matchTimer", 0, 360, 240, 120);
-        enableDragAndResize(zeroGyroTile, "zeroGyro", 260, 360, 240, 120);
-        enableDragAndResize(driveModeTile, "driveMode", 520, 360, 240, 120);
-        enableDragAndResize(shootTile, "shoot", 260, 500, 240, 120);
-        enableDragAndResize(intakeTile, "intake", 520, 500, 240, 120);
-        enableDragAndResize(shooterTile, "shooter", 0, 640, 520, 160);
-        enableDragAndResize(boostTile, "boost", 560, 640, 340, 160);
-        enableDragAndResize(spindexerReverseTile, "spindexerReverse", 0, 820, 240, 120);
-        enableDragAndResize(hoodDownTile, "hoodDown", 260, 820, 240, 120);
-        enableDragAndResize(confirmTile, "confirm", 520, 820, 240, 120);
-        enableDragAndResize(intakeInTile, "intakeIn", 0, 960, 240, 120);
-        enableDragAndResize(funnlingTile, "funnling", 780, 500, 240, 120);
-        enableDragAndResize(manualTile, "manual", 780, 820, 240, 120);
+        enableDragAndResize(matchTimerTile, "matchTimer", 0, 500, 240, 120);
+        enableDragAndResize(zeroGyroTile, "zeroGyro", 260, 500, 240, 120);
+        enableDragAndResize(driveModeTile, "driveMode", 520, 500, 240, 120);
+        enableDragAndResize(shootTile, "shoot", 260, 640, 240, 120);
+        enableDragAndResize(intakeTile, "intake", 520, 640, 240, 120);
+        enableDragAndResize(shooterTile, "shooter", 0, 780, 520, 160);
+        enableDragAndResize(boostTile, "boost", 560, 780, 340, 160);
+        enableDragAndResize(spindexerReverseTile, "spindexerReverse", 0, 960, 240, 120);
+        enableDragAndResize(hoodDownTile, "hoodDown", 260, 960, 240, 120);
+        enableDragAndResize(confirmTile, "confirm", 520, 960, 240, 120);
+        enableDragAndResize(intakeInTile, "intakeIn", 0, 1100, 240, 120);
+        enableDragAndResize(funnlingTile, "funnling", 780, 640, 240, 120);
+        enableDragAndResize(manualTile, "manual", 780, 960, 240, 120);
 
         StackPane wrapper = new StackPane(pane);
         StackPane.setMargin(pane, new Insets(0, 0, 0, 12));
