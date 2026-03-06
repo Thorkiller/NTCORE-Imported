@@ -94,6 +94,7 @@ public final class DashboardView {
     private final BooleanPublisher intakeCmd = NT.pubBool("/Dashboard/Intake");
     private final BooleanPublisher intakeInCmd = NT.pubBool("/Dashboard/IntakeIn");
     private final DoublePublisher shooterTargetCmd = NT.pubDouble("/Dashboard/ShooterTargetRPM");
+    private final DoublePublisher shooterBoostCmd = NT.pubDouble("/Dashboard/ShooterBoostRPM");
     private final BooleanPublisher hoodAngleCmd = NT.pubBool("/Dashboard/HoodAngleDeg");
     private final DoublePublisher hoodSetpointCmd = NT.pubDouble("/Dashboard/HoodSetpointDeg");
     private final BooleanPublisher spindexerCmd = NT.pubBool("/Dashboard/Spindexer");
@@ -1139,7 +1140,7 @@ public final class DashboardView {
         Label title = new Label("Velocity Boost");
         title.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 700;");
 
-        shooterBoostSlider = new Slider(0.0, 2000.0, 0.0);
+        shooterBoostSlider = new Slider(-2000.0, 2000.0, 0.0);
         shooterBoostSlider.setShowTickMarks(true);
         shooterBoostSlider.setShowTickLabels(true);
         shooterBoostSlider.setMajorTickUnit(500.0);
@@ -1149,8 +1150,11 @@ public final class DashboardView {
 
         boostValueLabel.setStyle("-fx-text-fill: #f8fafc; -fx-font-weight: 800;");
         shooterBoostSlider.valueProperty().addListener((obs, oldV, newV) -> {
-            boostValueLabel.setText(String.format("Boost: +%.0f RPM", newV.doubleValue()));
+            double boostRpm = newV.doubleValue();
+            boostValueLabel.setText(String.format("Boost: %s RPM", formatSignedRpm(boostRpm)));
+            shooterBoostCmd.set(boostRpm);
         });
+        shooterBoostCmd.set(shooterBoostSlider.getValue());
 
         Button boostDown = new Button("-200");
         Button boostUp = new Button("+200");
@@ -1217,6 +1221,10 @@ public final class DashboardView {
         double max = shooterBoostSlider.getMax();
         double next = shooterBoostSlider.getValue() + delta;
         shooterBoostSlider.setValue(Math.max(min, Math.min(max, next)));
+    }
+
+    private String formatSignedRpm(double value) {
+        return String.format("%+.0f", value);
     }
 
     private Parent buildShooterControlTab() {
@@ -1286,15 +1294,15 @@ public final class DashboardView {
                 double boostedRpm = rpm + boostRpm;
                 shooterTargetCmd.set(boostedRpm);
                 rpmStatus.setText(String.format(
-                    "Last sent: %.0f RPM (boost +%.0f RPM -> %.0f RPM)",
+                    "Last sent: %.0f RPM (boost %s RPM -> %.0f RPM)",
                     rpm,
-                    boostRpm,
+                    formatSignedRpm(boostRpm),
                     boostedRpm
                 ));
                 appendLog(String.format(
-                    "Setpoints sent: %.0f RPM (boost +%.0f RPM -> %.0f RPM), hood %.1f deg",
+                    "Setpoints sent: %.0f RPM (boost %s RPM -> %.0f RPM), hood %.1f deg",
                     rpm,
-                    boostRpm,
+                    formatSignedRpm(boostRpm),
                     boostedRpm,
                     hoodDeg
                 ));
