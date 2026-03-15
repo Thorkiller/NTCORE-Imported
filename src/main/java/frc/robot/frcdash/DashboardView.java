@@ -102,6 +102,8 @@ public final class DashboardView {
     private final BooleanPublisher funnlingCmd = NT.pubBool("/Dashboard/Funnling");
     private final BooleanPublisher manualCmd = NT.pubBool("/Dashboard/Manual");
     private final BooleanPublisher confirmCmd = NT.pubBool("/Dashboard/Confirm");
+    private final BooleanPublisher passingHumanPlayerCmd = NT.pubBool("/1771 passing/Human Player");
+    private final BooleanPublisher passingDepotCmd = NT.pubBool("/1771 passing/Depot");
 
     // Editable tiles (robot -> dashboard)
     private DoubleTopicTile batteryTile;
@@ -119,6 +121,9 @@ public final class DashboardView {
     private Button confirmTile;
     private ToggleButton funnlingTile;
     private ToggleButton manualTile;
+    private ToggleButton passingHumanPlayerTile;
+    private ToggleButton passingDepotTile;
+    private StackPane passingTile;
     private StackPane shooterTile;
     private StackPane boostTile;
     private Slider shooterBoostSlider;
@@ -430,6 +435,7 @@ public final class DashboardView {
             manualCmd,
             "Manual toggled"
         );
+        passingTile = buildPassingTile();
 
         loadLayout();
 
@@ -442,7 +448,8 @@ public final class DashboardView {
         pane.getChildren().addAll(
             batteryTile, enabledTile, visionTile, fieldTile, matchTimerTile,
             zeroGyroTile, driveModeTile, shootTile, intakeTile, shooterTile, boostTile,
-            spindexerReverseTile, hoodDownTile, confirmTile, intakeInTile, funnlingTile, manualTile);
+            spindexerReverseTile, hoodDownTile, confirmTile, intakeInTile, funnlingTile, manualTile,
+            passingTile);
 
         enableDragAndResize(batteryTile, "battery", 0, 0, 380, 160);
         enableDragAndResize(enabledTile, "enabled", 0, 190, 380, 160);
@@ -461,6 +468,7 @@ public final class DashboardView {
         enableDragAndResize(intakeInTile, "intakeIn", 0, 1100, 240, 120);
         enableDragAndResize(funnlingTile, "funnling", 780, 640, 240, 120);
         enableDragAndResize(manualTile, "manual", 780, 960, 240, 120);
+        enableDragAndResize(passingTile, "passing1771", 780, 780, 280, 280);
 
         StackPane wrapper = new StackPane(pane);
         StackPane.setMargin(pane, new Insets(0, 0, 0, 12));
@@ -757,8 +765,8 @@ public final class DashboardView {
         if (elapsed < 0) elapsed = 0;
 
         String alliance = allianceSub.get().trim();
-        boolean isBlue = alliance.equalsIgnoreCase("Blue");
-        boolean isRed = alliance.equalsIgnoreCase("Red");
+        boolean isBlue = alliance.equalsIgnoreCase("B");
+        boolean isRed = alliance.equalsIgnoreCase("R");
 
         if (elapsed < AUTO_SECONDS) {
             setHubStatus("BOTH ACTIVE", "--", "--", getPreShootColor(shootWindow, "#94a3b8"));
@@ -1187,6 +1195,65 @@ public final class DashboardView {
         return tile;
     }
 
+    private StackPane buildPassingTile() {
+        Label title = new Label("1771 Glaze");
+        title.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 800; -fx-font-size: 16;");
+
+        passingHumanPlayerTile = buildToggleActionTile(
+            "Human Player",
+            passingHumanPlayerCmd,
+            "1771 passing/Human Player toggled"
+        );
+        passingDepotTile = buildToggleActionTile(
+            "Depot",
+            passingDepotCmd,
+            "1771 passing/Depot toggled"
+        );
+        passingHumanPlayerTile.setOnAction(e -> handlePassingToggle(
+            passingHumanPlayerTile,
+            passingHumanPlayerCmd,
+            "1771 passing/Human Player",
+            passingDepotTile,
+            passingDepotCmd,
+            "1771 passing/Depot"
+        ));
+        passingDepotTile.setOnAction(e -> handlePassingToggle(
+            passingDepotTile,
+            passingDepotCmd,
+            "1771 passing/Depot",
+            passingHumanPlayerTile,
+            passingHumanPlayerCmd,
+            "1771 passing/Human Player"
+        ));
+
+        passingHumanPlayerTile.setMinHeight(70);
+        passingDepotTile.setMinHeight(70);
+        passingHumanPlayerTile.setMaxWidth(Double.MAX_VALUE);
+        passingDepotTile.setMaxWidth(Double.MAX_VALUE);
+
+        HBox toggles = new HBox(10, passingHumanPlayerTile, passingDepotTile);
+        toggles.setAlignment(Pos.CENTER);
+        HBox.setHgrow(passingHumanPlayerTile, Priority.ALWAYS);
+        HBox.setHgrow(passingDepotTile, Priority.ALWAYS);
+        passingHumanPlayerTile.prefWidthProperty().bind(toggles.widthProperty().subtract(10).divide(2));
+        passingDepotTile.prefWidthProperty().bind(toggles.widthProperty().subtract(10).divide(2));
+
+        VBox content = new VBox(10, title, toggles);
+        content.setAlignment(Pos.CENTER);
+        content.setFillWidth(true);
+
+        StackPane tile = new StackPane(content);
+        tile.setPadding(new Insets(10));
+        tile.setStyle("""
+            -fx-background-color: #0f172a;
+            -fx-background-radius: 16;
+            -fx-border-color: #1f2a44;
+            -fx-border-radius: 16;
+        """);
+
+        return tile;
+    }
+
     private void styleBoostButton(Button button, String base, String border, String hover) {
         button.setPrefWidth(120);
         button.setPrefHeight(40);
@@ -1213,6 +1280,29 @@ public final class DashboardView {
         button.setStyle(baseStyle);
         button.setOnMouseEntered(e -> button.setStyle(hoverStyle));
         button.setOnMouseExited(e -> button.setStyle(baseStyle));
+    }
+
+    private void handlePassingToggle(
+        ToggleButton currentButton,
+        BooleanPublisher currentPublisher,
+        String currentLabel,
+        ToggleButton otherButton,
+        BooleanPublisher otherPublisher,
+        String otherLabel
+    ) {
+        playClickAnimation(currentButton);
+        boolean selected = currentButton.isSelected();
+
+        if (selected && otherButton.isSelected()) {
+            otherButton.setSelected(false);
+            otherPublisher.set(false);
+            updateToggleTileStyle(otherButton, false);
+            appendLog(otherLabel + " false");
+        }
+
+        currentPublisher.set(selected);
+        updateToggleTileStyle(currentButton, selected);
+        appendLog(currentLabel + (selected ? " true" : " false"));
     }
 
     private void adjustBoostBy(double delta) {
