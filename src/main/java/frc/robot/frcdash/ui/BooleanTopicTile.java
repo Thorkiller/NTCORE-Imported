@@ -85,12 +85,19 @@ public final class BooleanTopicTile extends VBox {
 
     public void update() {
         if (sub == null) return;
-        boolean v = sub.get();
-        valueLabel.setText(formatter.apply(v));
+        showValue(getCurrentValue());
     }
 
     public String getTopicPath() {
         return topicPath;
+    }
+
+    public boolean getCurrentValue() {
+        return sub != null && sub.get();
+    }
+
+    public void showValue(boolean value) {
+        valueLabel.setText(formatter.apply(value));
     }
 
     private ContextMenu buildContextMenu() {

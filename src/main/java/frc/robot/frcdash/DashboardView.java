@@ -5,7 +5,9 @@ import edu.wpi.first.networktables.BooleanPublisher;
 import edu.wpi.first.networktables.DoubleArraySubscriber;
 import edu.wpi.first.networktables.DoublePublisher;
 import edu.wpi.first.networktables.DoubleSubscriber;
+import edu.wpi.first.networktables.NetworkTable;
 import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StringArrayPublisher;
 import edu.wpi.first.networktables.StringSubscriber;
 import edu.wpi.first.networktables.StructSubscriber;
 import edu.wpi.first.networktables.TimestampedObject;
@@ -33,6 +35,7 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.shape.Rectangle;
+import javafx.stage.FileChooser;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,6 +49,7 @@ import java.util.Properties;
 import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
 
 public final class DashboardView {
     private static final double FIELD_LENGTH_METERS = 16.54;
@@ -72,6 +76,7 @@ public final class DashboardView {
     private static final boolean INVERT_X = true;
     private static final boolean INVERT_Y = false;
     private static final double SHOOTER_RPM_TOLERANCE = 50.0;
+    private static final double MOTOR_TOO_HOT_THRESHOLD_C = 54.4444444444;
 
     private final BorderPane root = new BorderPane();
     private final StackPane tabContent = new StackPane();
@@ -107,12 +112,16 @@ public final class DashboardView {
 
     // Editable tiles (robot -> dashboard)
     private DoubleTopicTile batteryTile;
+    private DoubleTopicTile intakeMotorTempTile;
+    private DoubleTopicTile intakeWheelsTempTile;
     private StringTopicTile enabledTile;
     private BooleanTopicTile visionTile;
     private StackPane fieldTile;
     private StackPane matchTimerTile;
     private Button zeroGyroTile;
     private Button driveModeTile;
+    private StackPane motorHealthTile;
+    private StackPane roboRioHealthTile;
     private Button shootTile;
     private Button intakeTile;
     private Button intakeInTile;
@@ -127,6 +136,15 @@ public final class DashboardView {
     private StackPane shooterTile;
     private StackPane boostTile;
     private Slider shooterBoostSlider;
+    private TextField shooterRpmField;
+    private Slider shooterRpmSlider;
+    private Label shooterRpmSliderValueLabel;
+    private TextField hoodSetpointField;
+    private Slider hoodSetpointSlider;
+    private Label hoodSliderValueLabel;
+    private Label shooterRpmStatusLabel;
+    private Label hoodSetpointStatusLabel;
+    private Label shooterControlErrorLabel;
     private final Label boostValueLabel = new Label("Boost: +0 RPM");
     private final Label shooterStatusLabel = new Label("NOT READY");
     private final Label shooterActualLabel = new Label("Actual: -- RPM");
@@ -136,12 +154,48 @@ public final class DashboardView {
     private final Label hubStatusLabel = new Label("HUB: --");
     private final Label hubCountdownLabel = new Label("--");
     private final Label hubAllianceLabel = new Label("--");
+    private final Label motorHealthSummaryLabel = new Label("Motor health: --");
+    private final Label motorDisconnectedLabel = new Label("Disconnected: --");
+    private final Label motorHotLabel = new Label("Hot: --");
+    private final Label roboRioHealthSummaryLabel = new Label("roboRIO health: --");
+    private final Label roboRioRestartLabel = new Label("Restart: --");
+    private final Label roboRioPowerLabel = new Label("Power: --");
+    private final Label roboRioRailsLabel = new Label("Rails: --");
+    private final Label replayStatusLabel = new Label("Replay idle");
     private javafx.stage.Stage logStage;
+    private Button recordReplayButton;
+    private Button stopRecordReplayButton;
+    private Button loadReplayButton;
+    private Button playReplayButton;
+    private Button stopReplayButton;
+    private Slider replayScrubber;
+    private Label replayTimeLabel;
+    private Button shooterBoostDownButton;
+    private Button shooterBoostUpButton;
+    private Button shooterSendSetpointsButton;
+    private Button spindexerStartButton;
+    private Button spindexerControlReverseButton;
+    private Button spindexerStopButton;
+    private boolean ntConnected;
+    private boolean suppressDashboardPublishing;
+    private boolean suppressReplayScrubberEvents;
+    private final List<String> pendingReplayEvents = new ArrayList<>();
 
     private final DoubleSubscriber matchTimeSub = NT.subDouble("/AdvantageKit/RealOutputs/MatchTime", 0.0);
     private final StringSubscriber autoWinnerSub = NT.subString("/AdvantageKit/RealOutputs/AutoWinner", "");
     private final DoubleSubscriber shooterRpmSub = NT.subDouble("/AdvantageKit/Shooter/ShooterRPM", 0.0);
     private final DoubleSubscriber shooterTargetSub = NT.subDouble("/AdvantageKit/Shooter/TargetRPM", 0.0);
+    private final NetworkTable motorHealthTable = NetworkTableInstance.getDefault().getTable("MotorHealth");
+    private final NetworkTable roboRioHealthTable = NetworkTableInstance.getDefault().getTable("RoboRIOHealth");
+    private final BooleanPublisher allConnectedPub = NT.pubBool("/MotorHealth/AllConnected");
+    private final BooleanPublisher allCoolPub = NT.pubBool("/MotorHealth/AllCool");
+    private final BooleanPublisher healthyPub = NT.pubBool("/MotorHealth/Healthy");
+    private final StringArrayPublisher disconnectedMotorsPub = NT.pubStringArray("/MotorHealth/DisconnectedMotors");
+    private final StringArrayPublisher hotMotorsPub = NT.pubStringArray("/MotorHealth/HotMotors");
+    private final DoublePublisher tooHotThresholdPub = NT.pubDouble("/MotorHealth/TooHotThresholdC");
+    private final edu.wpi.first.networktables.StringPublisher overallStatusPub = NT.pubString("/MotorHealth/OverallStatus");
+    private final BooleanPublisher roboRioHealthyPub = NT.pubBool("/RoboRIOHealth/Healthy");
+    private final edu.wpi.first.networktables.StringPublisher roboRioStatusPub = NT.pubString("/RoboRIOHealth/Status");
     private StructSubscriber<Pose2d> poseSub;
     private DoubleArraySubscriber poseArraySub;
     private StringSubscriber allianceSub;
@@ -159,6 +213,12 @@ public final class DashboardView {
     private final Properties layoutProps = new Properties();
     private final Path layoutPath =
         Paths.get(System.getProperty("user.home"), ".frcdash", "layout.properties");
+    private final DashboardReplayManager replayManager = new DashboardReplayManager(
+        Paths.get(System.getProperty("user.home"), ".frcdash", "replays"),
+        this::captureSnapshot,
+        this::applySnapshot,
+        this::appendLog
+    );
 
     public DashboardView() {
         root.setPadding(new Insets(14));
@@ -177,19 +237,28 @@ public final class DashboardView {
         setupLogWindow();
 
         NT.onConnectionChange(connected -> {
+            ntConnected = connected;
             setConnState(connected);
             appendLog(connected ? "Connected" : "Disconnected");
         });
 
         new AnimationTimer() {
             @Override public void handle(long now) {
+                refreshReplayTimelineUi();
+                if (replayManager.isReplaying()) {
+                    return;
+                }
                 if (batteryTile != null) batteryTile.update();
+                if (intakeMotorTempTile != null) intakeMotorTempTile.update();
+                if (intakeWheelsTempTile != null) intakeWheelsTempTile.update();
                 if (enabledTile != null) enabledTile.update();
                 if (visionTile != null) visionTile.update();
                 if (fieldTile != null) updateFieldPose();
                 updateMatchTimer();
                 updateHubTimer();
                 updateShooterStatus();
+                updateMotorHealth();
+                updateRoboRioHealth();
             }
         }.start();
     }
@@ -361,6 +430,22 @@ public final class DashboardView {
             0.0,
             v -> String.format("%.2f V", v)
         );
+        intakeMotorTempTile = new DoubleTopicTile(
+            inst,
+            "Intake Motor Temp",
+            "Topic: /AdvantageKit/Intake/IntakeMotorTemp",
+            "/AdvantageKit/Intake/IntakeMotorTemp",
+            0.0,
+            v -> String.format("%.1f C", v)
+        );
+        intakeWheelsTempTile = new DoubleTopicTile(
+            inst,
+            "Intake Wheels Temp",
+            "Topic: /AdvantageKit/Intake/IntakeWheelTemp",
+            "/AdvantageKit/Intake/IntakeWheelTemp",
+            0.0,
+            v -> String.format("%.1f C", v)
+        );
         enabledTile = new StringTopicTile(
             inst,
             "Robot State",
@@ -378,6 +463,8 @@ public final class DashboardView {
             v -> v ? "Target is seen" : "Target is not seen"
         );
 
+        motorHealthTile = buildMotorHealthTile();
+        roboRioHealthTile = buildRoboRioHealthTile();
         fieldTile = buildFieldTile();
         matchTimerTile = buildMatchTimerTile();
         zeroGyroTile = buildActionTile(
@@ -440,35 +527,39 @@ public final class DashboardView {
         loadLayout();
 
         Pane pane = new Pane();
-        pane.setMinHeight(1120);
+        pane.setMinHeight(1440);
         Rectangle clip = new Rectangle();
         clip.widthProperty().bind(pane.widthProperty());
         clip.heightProperty().bind(pane.heightProperty());
         pane.setClip(clip);
         pane.getChildren().addAll(
-            batteryTile, enabledTile, visionTile, fieldTile, matchTimerTile,
+            batteryTile, intakeMotorTempTile, intakeWheelsTempTile, enabledTile, visionTile, motorHealthTile, roboRioHealthTile, fieldTile, matchTimerTile,
             zeroGyroTile, driveModeTile, shootTile, intakeTile, shooterTile, boostTile,
             spindexerReverseTile, hoodDownTile, confirmTile, intakeInTile, funnlingTile, manualTile,
             passingTile);
 
         enableDragAndResize(batteryTile, "battery", 0, 0, 380, 160);
+        enableDragAndResize(intakeMotorTempTile, "intakeMotorTemp", 420, 0, 240, 160);
+        enableDragAndResize(intakeWheelsTempTile, "intakeWheelsTemp", 680, 0, 240, 160);
         enableDragAndResize(enabledTile, "enabled", 0, 190, 380, 160);
         enableDragAndResize(visionTile, "vision", 0, 360, 380, 120);
+        enableDragAndResize(motorHealthTile, "motorHealth", 0, 500, 380, 210);
+        enableDragAndResize(roboRioHealthTile, "roboRioHealth", 0, 730, 380, 230);
         enableDragAndResize(fieldTile, "field", 420, 190, 520, 300);
-        enableDragAndResize(matchTimerTile, "matchTimer", 0, 500, 240, 120);
-        enableDragAndResize(zeroGyroTile, "zeroGyro", 260, 500, 240, 120);
-        enableDragAndResize(driveModeTile, "driveMode", 520, 500, 240, 120);
-        enableDragAndResize(shootTile, "shoot", 260, 640, 240, 120);
-        enableDragAndResize(intakeTile, "intake", 520, 640, 240, 120);
-        enableDragAndResize(shooterTile, "shooter", 0, 780, 520, 160);
+        enableDragAndResize(matchTimerTile, "matchTimer", 420, 500, 240, 120);
+        enableDragAndResize(zeroGyroTile, "zeroGyro", 680, 500, 240, 120);
+        enableDragAndResize(driveModeTile, "driveMode", 940, 500, 240, 120);
+        enableDragAndResize(shootTile, "shoot", 420, 640, 240, 120);
+        enableDragAndResize(intakeTile, "intake", 680, 640, 240, 120);
+        enableDragAndResize(shooterTile, "shooter", 420, 780, 520, 160);
         enableDragAndResize(boostTile, "boost", 560, 780, 340, 160);
-        enableDragAndResize(spindexerReverseTile, "spindexerReverse", 0, 960, 240, 120);
-        enableDragAndResize(hoodDownTile, "hoodDown", 260, 960, 240, 120);
-        enableDragAndResize(confirmTile, "confirm", 520, 960, 240, 120);
-        enableDragAndResize(intakeInTile, "intakeIn", 0, 1100, 240, 120);
-        enableDragAndResize(funnlingTile, "funnling", 780, 640, 240, 120);
-        enableDragAndResize(manualTile, "manual", 780, 960, 240, 120);
-        enableDragAndResize(passingTile, "passing1771", 780, 780, 280, 280);
+        enableDragAndResize(spindexerReverseTile, "spindexerReverse", 420, 960, 240, 120);
+        enableDragAndResize(hoodDownTile, "hoodDown", 680, 960, 240, 120);
+        enableDragAndResize(confirmTile, "confirm", 940, 960, 240, 120);
+        enableDragAndResize(intakeInTile, "intakeIn", 420, 1100, 240, 120);
+        enableDragAndResize(funnlingTile, "funnling", 940, 640, 240, 120);
+        enableDragAndResize(manualTile, "manual", 940, 780, 240, 120);
+        enableDragAndResize(passingTile, "passing1771", 940, 1100, 280, 280);
 
         StackPane wrapper = new StackPane(pane);
         StackPane.setMargin(pane, new Insets(0, 0, 0, 12));
@@ -589,7 +680,10 @@ public final class DashboardView {
         Label label = new Label("Log");
         label.setStyle("-fx-text-fill: #cbd5e1; -fx-font-weight: 700;");
 
-        VBox box = new VBox(8, label, log);
+        HBox replayControls = buildReplayControls();
+        HBox replayScrubberRow = buildReplayScrubberRow();
+
+        VBox box = new VBox(8, label, replayControls, replayStatusLabel, replayScrubberRow, log);
         box.setPadding(new Insets(12));
         box.setStyle("-fx-background-color: #0b1220;");
 
@@ -609,9 +703,470 @@ public final class DashboardView {
         });
     }
 
+    private HBox buildReplayControls() {
+        recordReplayButton = new Button("Start Recording");
+        stopRecordReplayButton = new Button("Stop Recording");
+        loadReplayButton = new Button("Load Replay");
+        playReplayButton = new Button("Play Replay");
+        stopReplayButton = new Button("Stop Replay");
+
+        styleReplayButton(recordReplayButton);
+        styleReplayButton(stopRecordReplayButton);
+        styleReplayButton(loadReplayButton);
+        styleReplayButton(playReplayButton);
+        styleReplayButton(stopReplayButton);
+
+        replayStatusLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12; -fx-font-weight: 700;");
+
+        recordReplayButton.setOnAction(e -> startReplayRecording());
+        stopRecordReplayButton.setOnAction(e -> stopReplayRecording());
+        loadReplayButton.setOnAction(e -> chooseReplayFile());
+        playReplayButton.setOnAction(e -> toggleReplayPlayback());
+        stopReplayButton.setOnAction(e -> stopReplayPlayback());
+
+        updateReplayControls();
+
+        HBox row = new HBox(8,
+            recordReplayButton,
+            stopRecordReplayButton,
+            loadReplayButton,
+            playReplayButton,
+            stopReplayButton
+        );
+        row.setAlignment(Pos.CENTER_LEFT);
+        return row;
+    }
+
+    private HBox buildReplayScrubberRow() {
+        replayScrubber = new Slider(0.0, 1.0, 0.0);
+        replayScrubber.setPrefWidth(360);
+        replayScrubber.setDisable(true);
+        replayTimeLabel = new Label("00:00 / 00:00");
+        replayTimeLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12; -fx-font-weight: 700;");
+
+        replayScrubber.valueProperty().addListener((obs, oldV, newV) -> {
+            if (suppressReplayScrubberEvents || replayScrubber == null || replayScrubber.isDisabled()) {
+                return;
+            }
+            long seekMillis = Math.round(newV.doubleValue());
+            replayManager.seekToElapsed(seekMillis);
+            refreshReplayTimelineUi();
+        });
+
+        HBox row = new HBox(10, replayScrubber, replayTimeLabel);
+        row.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(replayScrubber, Priority.ALWAYS);
+        return row;
+    }
+
+    private void styleReplayButton(Button button) {
+        button.setCursor(Cursor.HAND);
+        button.setStyle("""
+            -fx-background-color: #111827;
+            -fx-background-radius: 10;
+            -fx-border-color: #1f2a44;
+            -fx-border-radius: 10;
+            -fx-text-fill: #f8fafc;
+            -fx-font-weight: 700;
+        """);
+    }
+
     private void appendLog(String msg) {
         String ts = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         log.appendText("[" + ts + "] " + msg + "\n");
+    }
+
+    private void startReplayRecording() {
+        try {
+            replayManager.stopReplay();
+            replayManager.startRecording();
+            updateReplayControls();
+            Path path = replayManager.getCurrentRecordingPath();
+            replayStatusLabel.setText("Recording: " + (path != null ? path.getFileName() : ""));
+            appendLog("Replay recording started");
+        } catch (IOException ex) {
+            replayStatusLabel.setText("Recording failed");
+            appendLog("Replay recording failed: " + ex.getMessage());
+        }
+    }
+
+    private void stopReplayRecording() {
+        Path path = replayManager.getCurrentRecordingPath();
+        replayManager.stopRecording();
+        updateReplayControls();
+        if (path != null) {
+            replayStatusLabel.setText("Saved replay: " + path.getFileName());
+            appendLog("Replay recording saved: " + path);
+        } else {
+            replayStatusLabel.setText("Replay idle");
+        }
+    }
+
+    private void chooseReplayFile() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Open Dashboard Replay");
+        chooser.getExtensionFilters().add(
+            new FileChooser.ExtensionFilter("Dashboard Replay", "*.dashreplay")
+        );
+        Path latest = null;
+        try {
+            latest = replayManager.getLatestReplayPath();
+        } catch (IOException ignored) {
+        }
+        if (latest != null && Files.exists(latest.getParent())) {
+            chooser.setInitialDirectory(latest.getParent().toFile());
+            chooser.setInitialFileName(latest.getFileName().toString());
+        }
+        if (logStage == null || logStage.getScene() == null) {
+            return;
+        }
+        var file = chooser.showOpenDialog(logStage);
+        if (file == null) {
+            return;
+        }
+        loadReplay(file.toPath());
+    }
+
+    private void toggleReplayPlayback() {
+        if (replayManager.isReplaying()) {
+            replayManager.pauseReplay();
+            replayStatusLabel.setText("Replay paused");
+            appendLog("Replay paused");
+        } else if (replayManager.getLoadedReplayPath() != null) {
+            replayManager.playReplay();
+            replayStatusLabel.setText("Replaying: " + replayManager.getLoadedReplayPath().getFileName());
+            appendLog("Replay started");
+        } else {
+            try {
+                Path latest = replayManager.getLatestReplayPath();
+                if (latest == null) {
+                    replayStatusLabel.setText("No replay file found");
+                    return;
+                }
+                loadReplay(latest);
+                replayManager.playReplay();
+                replayStatusLabel.setText("Replaying: " + latest.getFileName());
+                appendLog("Replay started");
+            } catch (IOException ex) {
+                replayStatusLabel.setText("Replay load failed");
+                appendLog("Replay load failed: " + ex.getMessage());
+            }
+        }
+        updateReplayControls();
+    }
+
+    private void stopReplayPlayback() {
+        replayManager.stopReplay();
+        updateReplayControls();
+        if (replayManager.getLoadedReplayPath() != null) {
+            replayStatusLabel.setText("Replay stopped: " + replayManager.getLoadedReplayPath().getFileName());
+        } else {
+            replayStatusLabel.setText("Replay idle");
+        }
+        appendLog("Replay stopped");
+    }
+
+    private void loadReplay(Path path) {
+        try {
+            replayManager.loadReplay(path);
+            replayStatusLabel.setText(
+                String.format("Loaded replay: %s (%d snapshots)",
+                    path.getFileName(),
+                    replayManager.getLoadedSnapshotCount())
+            );
+            appendLog("Replay loaded: " + path);
+            updateReplayControls();
+        } catch (IOException ex) {
+            replayStatusLabel.setText("Replay load failed");
+            appendLog("Replay load failed: " + ex.getMessage());
+        }
+    }
+
+    private void updateReplayControls() {
+        boolean recording = replayManager.isRecording();
+        boolean replaying = replayManager.isReplaying();
+        boolean hasReplay = replayManager.getLoadedReplayPath() != null;
+
+        if (recordReplayButton != null) recordReplayButton.setDisable(recording);
+        if (stopRecordReplayButton != null) stopRecordReplayButton.setDisable(!recording);
+        if (loadReplayButton != null) loadReplayButton.setDisable(recording);
+        if (playReplayButton != null) {
+            playReplayButton.setDisable(recording);
+            playReplayButton.setText(replaying ? "Pause Replay" : "Play Replay");
+        }
+        if (stopReplayButton != null) stopReplayButton.setDisable(!hasReplay && !replaying);
+        if (replayScrubber != null) {
+            replayScrubber.setDisable(recording || !hasReplay);
+        }
+        refreshReplayTimelineUi();
+    }
+
+    private void refreshReplayTimelineUi() {
+        if (replayScrubber == null || replayTimeLabel == null) {
+            return;
+        }
+        long total = replayManager.getReplayDurationMillis();
+        long current = replayManager.getCurrentReplayElapsedMillis();
+        suppressReplayScrubberEvents = true;
+        replayScrubber.setMax(Math.max(1L, total));
+        replayScrubber.setValue(Math.min(current, Math.max(1L, total)));
+        suppressReplayScrubberEvents = false;
+        replayTimeLabel.setText(
+            formatReplayTime(current) + " / " + formatReplayTime(total)
+        );
+    }
+
+    private String formatReplayTime(long millis) {
+        long totalSeconds = Math.max(0L, millis / 1000L);
+        long mins = totalSeconds / 60L;
+        long secs = totalSeconds % 60L;
+        return String.format("%02d:%02d", mins, secs);
+    }
+
+    private DashboardReplayManager.DashboardSnapshot captureSnapshot() {
+        double[] pose = readCurrentPose();
+        double[] gamePieces = gamePieceSub != null ? gamePieceSub.get() : new double[0];
+        String replayEvents = drainReplayEvents();
+        return new DashboardReplayManager.DashboardSnapshot(
+            0L,
+            ntConnected,
+            dashboardTabButton != null && dashboardTabButton.isSelected() ? "Dashboard" : "Shooter",
+            batteryTile != null ? batteryTile.getTopicPath() : "",
+            batteryTile != null ? batteryTile.getCurrentValue() : 0.0,
+            intakeMotorTempTile != null ? intakeMotorTempTile.getTopicPath() : "",
+            intakeMotorTempTile != null ? intakeMotorTempTile.getCurrentValue() : 0.0,
+            intakeWheelsTempTile != null ? intakeWheelsTempTile.getTopicPath() : "",
+            intakeWheelsTempTile != null ? intakeWheelsTempTile.getCurrentValue() : 0.0,
+            enabledTile != null ? enabledTile.getTopicPath() : "",
+            enabledTile != null ? enabledTile.getCurrentValue() : "",
+            visionTile != null ? visionTile.getTopicPath() : "",
+            visionTile != null && visionTile.getCurrentValue(),
+            matchTimeSub != null ? matchTimeSub.get() : 0.0,
+            matchTimerLabel.getText(),
+            canShootLabel.getText(),
+            hubStatusLabel.getText(),
+            hubAllianceLabel.getText(),
+            hubCountdownLabel.getText(),
+            shooterTargetSub != null ? shooterTargetSub.get() : 0.0,
+            shooterRpmSub != null ? shooterRpmSub.get() : 0.0,
+            shooterStatusLabel.getText(),
+            shooterBoostSlider != null ? shooterBoostSlider.getValue() : 0.0,
+            shooterRpmField != null ? shooterRpmField.getText() : "",
+            shooterRpmSlider != null ? shooterRpmSlider.getValue() : 0.0,
+            shooterRpmSliderValueLabel != null ? shooterRpmSliderValueLabel.getText() : "",
+            hoodSetpointField != null ? hoodSetpointField.getText() : "",
+            hoodSetpointSlider != null ? hoodSetpointSlider.getValue() : 0.0,
+            hoodSliderValueLabel != null ? hoodSliderValueLabel.getText() : "",
+            shooterRpmStatusLabel != null ? shooterRpmStatusLabel.getText() : "",
+            hoodSetpointStatusLabel != null ? hoodSetpointStatusLabel.getText() : "",
+            shooterControlErrorLabel != null ? shooterControlErrorLabel.getText() : "",
+            replayEvents,
+            funnlingTile != null && funnlingTile.isSelected(),
+            manualTile != null && manualTile.isSelected(),
+            passingHumanPlayerTile != null && passingHumanPlayerTile.isSelected(),
+            passingDepotTile != null && passingDepotTile.isSelected(),
+            allianceSub != null ? allianceSub.get().trim() : "",
+            pose[0],
+            pose[1],
+            pose[2],
+            Arrays.copyOf(gamePieces, gamePieces.length)
+        );
+    }
+
+    private void applySnapshot(DashboardReplayManager.DashboardSnapshot snapshot) {
+        suppressDashboardPublishing = true;
+        try {
+            ntConnected = snapshot.connected();
+            setConnState(snapshot.connected());
+
+            if ("Shooter".equals(snapshot.selectedTab())) {
+                if (shooterTabButton != null) shooterTabButton.setSelected(true);
+                selectTab("Shooter");
+            } else {
+                if (dashboardTabButton != null) dashboardTabButton.setSelected(true);
+                selectTab("Dashboard");
+            }
+
+            if (batteryTile != null) batteryTile.showValue(snapshot.batteryValue());
+            if (intakeMotorTempTile != null) intakeMotorTempTile.showValue(snapshot.intakeMotorTempValue());
+            if (intakeWheelsTempTile != null) intakeWheelsTempTile.showValue(snapshot.intakeWheelsTempValue());
+            if (enabledTile != null) enabledTile.showValue(snapshot.enabledValue());
+            if (visionTile != null) visionTile.showValue(snapshot.visionValue());
+
+            matchTimerLabel.setText(snapshot.matchTimerText());
+            applyCanShootText(snapshot.canShootText());
+            hubStatusLabel.setText(snapshot.hubStatus());
+            hubAllianceLabel.setText(snapshot.hubAlliance());
+            hubCountdownLabel.setText(snapshot.hubCountdown());
+
+            shooterTargetLabel.setText(String.format("Target: %.0f RPM", snapshot.shooterTarget()));
+            shooterActualLabel.setText(String.format("Actual: %.0f RPM", snapshot.shooterActual()));
+            applyShooterStatusText(snapshot.shooterStatus());
+
+            if (shooterBoostSlider != null) {
+                shooterBoostSlider.setValue(snapshot.shooterBoost());
+            } else {
+                boostValueLabel.setText(String.format("Boost: %s RPM", formatSignedRpm(snapshot.shooterBoost())));
+            }
+
+            if (shooterRpmField != null) shooterRpmField.setText(snapshot.shooterRpmFieldText());
+            if (shooterRpmSlider != null) shooterRpmSlider.setValue(snapshot.shooterRpmSliderValue());
+            if (shooterRpmSliderValueLabel != null) shooterRpmSliderValueLabel.setText(snapshot.shooterRpmSliderText());
+            if (hoodSetpointField != null) hoodSetpointField.setText(snapshot.hoodFieldText());
+            if (hoodSetpointSlider != null) hoodSetpointSlider.setValue(snapshot.hoodSliderValue());
+            if (hoodSliderValueLabel != null) hoodSliderValueLabel.setText(snapshot.hoodSliderText());
+            if (shooterRpmStatusLabel != null) shooterRpmStatusLabel.setText(snapshot.shooterRpmStatus());
+            if (hoodSetpointStatusLabel != null) hoodSetpointStatusLabel.setText(snapshot.hoodStatus());
+            if (shooterControlErrorLabel != null) shooterControlErrorLabel.setText(snapshot.shooterControlError());
+
+            if (funnlingTile != null) {
+                animateIfStateChanged(funnlingTile, snapshot.funnling());
+                funnlingTile.setSelected(snapshot.funnling());
+                updateToggleTileStyle(funnlingTile, snapshot.funnling());
+            }
+            if (manualTile != null) {
+                animateIfStateChanged(manualTile, snapshot.manual());
+                manualTile.setSelected(snapshot.manual());
+                updateToggleTileStyle(manualTile, snapshot.manual());
+            }
+            if (passingHumanPlayerTile != null) {
+                animateIfStateChanged(passingHumanPlayerTile, snapshot.passingHumanPlayer());
+                passingHumanPlayerTile.setSelected(snapshot.passingHumanPlayer());
+                updateToggleTileStyle(passingHumanPlayerTile, snapshot.passingHumanPlayer());
+            }
+            if (passingDepotTile != null) {
+                animateIfStateChanged(passingDepotTile, snapshot.passingDepot());
+                passingDepotTile.setSelected(snapshot.passingDepot());
+                updateToggleTileStyle(passingDepotTile, snapshot.passingDepot());
+            }
+
+            renderFieldState(
+                snapshot.alliance(),
+                snapshot.poseX(),
+                snapshot.poseY(),
+                snapshot.poseDeg(),
+                snapshot.gamePieces()
+            );
+            playReplayEvents(snapshot.replayEvents());
+        } finally {
+            suppressDashboardPublishing = false;
+            updateReplayControls();
+        }
+    }
+
+    private void markReplayEvent(String eventId) {
+        pendingReplayEvents.add(eventId);
+    }
+
+    private String drainReplayEvents() {
+        if (pendingReplayEvents.isEmpty()) {
+            return "";
+        }
+        String value = String.join(",", pendingReplayEvents);
+        pendingReplayEvents.clear();
+        return value;
+    }
+
+    private void playReplayEvents(String replayEvents) {
+        if (replayEvents == null || replayEvents.isBlank()) {
+            return;
+        }
+        for (String eventId : replayEvents.split(",")) {
+            ButtonBase button = getReplayEventButton(eventId.trim());
+            if (button != null) {
+                playClickAnimation(button);
+            }
+        }
+    }
+
+    private ButtonBase getReplayEventButton(String eventId) {
+        return switch (eventId) {
+            case "zeroGyro" -> zeroGyroTile;
+            case "driveMode" -> driveModeTile;
+            case "shoot" -> shootTile;
+            case "intake" -> intakeTile;
+            case "intakeIn" -> intakeInTile;
+            case "spindexerReverse" -> spindexerReverseTile;
+            case "hoodDown" -> hoodDownTile;
+            case "confirm" -> confirmTile;
+            case "boostDown" -> shooterBoostDownButton;
+            case "boostUp" -> shooterBoostUpButton;
+            case "sendSetpoints" -> shooterSendSetpointsButton;
+            case "spindexerStart" -> spindexerStartButton;
+            case "spindexerControlReverse" -> spindexerControlReverseButton;
+            case "spindexerStop" -> spindexerStopButton;
+            default -> null;
+        };
+    }
+
+    private void animateIfStateChanged(ToggleButton button, boolean nextValue) {
+        if (button.isSelected() != nextValue) {
+            playClickAnimation(button);
+        }
+    }
+
+    private String replayEventIdFor(String titleText) {
+        return switch (titleText) {
+            case "Zero Gyro", "ZeroGyro pressed (200ms pulse)" -> "zeroGyro";
+            case "Driving", "DriveMode set true (200ms pulse)" -> "driveMode";
+            case "Shoot", "Shoot pressed (200ms pulse)" -> "shoot";
+            case "Intake", "Intake pressed (200ms pulse)" -> "intake";
+            case "Intake In", "IntakeIn pressed (200ms pulse)" -> "intakeIn";
+            case "Spindexer Reverse", "Spindexer reverse pressed (200ms pulse)" -> "spindexerReverse";
+            case "Hood Down", "Hood down pressed (200ms pulse)" -> "hoodDown";
+            case "Confirm", "Confirm pressed (200ms pulse)" -> "confirm";
+            case "1771 passing/Human Player" -> "passingHumanPlayer";
+            case "1771 passing/Depot" -> "passingDepot";
+            default -> null;
+        };
+    }
+
+    private void applyCanShootText(String text) {
+        canShootLabel.setText(text);
+        String color = "#94a3b8";
+        if ("CAN SHOOT".equalsIgnoreCase(text)) {
+            color = "#22c55e";
+        } else if ("CANNOT SHOOT".equalsIgnoreCase(text)) {
+            color = "#ef4444";
+        }
+        canShootLabel.setStyle(String.format("""
+            -fx-text-fill: %s;
+            -fx-font-weight: 800;
+            -fx-font-size: 12;
+        """, color));
+    }
+
+    private void applyShooterStatusText(String text) {
+        shooterStatusLabel.setText(text);
+        String color = "AT SPEED".equalsIgnoreCase(text) ? "#22c55e" : "#ef4444";
+        shooterStatusLabel.setStyle(String.format("""
+            -fx-text-fill: %s;
+            -fx-font-weight: 800;
+            -fx-font-size: 16;
+        """, color));
+    }
+
+    private double[] readCurrentPose() {
+        double poseX = 0.0;
+        double poseY = 0.0;
+        double poseDeg = 0.0;
+
+        TimestampedObject<Pose2d> atomic = poseSub != null ? poseSub.getAtomic() : null;
+        if (atomic != null && atomic.timestamp != 0) {
+            Pose2d pose = atomic.value;
+            poseX = pose.getX();
+            poseY = pose.getY();
+            poseDeg = pose.getRotation().getDegrees();
+        } else if (poseArraySub != null) {
+            double[] arr = poseArraySub.get();
+            if (arr.length >= 3) {
+                poseX = arr[0];
+                poseY = arr[1];
+                poseDeg = arr[2];
+            }
+        }
+
+        return new double[] {poseX, poseY, poseDeg};
     }
 
     private StackPane buildMatchTimerTile() {
@@ -665,6 +1220,10 @@ public final class DashboardView {
         tile.setMaxHeight(Double.MAX_VALUE);
         tile.setOnAction(e -> {
             playClickAnimation(tile);
+            String replayEventId = replayEventIdFor(titleText);
+            if (replayEventId != null) {
+                markReplayEvent(replayEventId);
+            }
             action.run();
         });
 
@@ -990,6 +1549,201 @@ public final class DashboardView {
         """, atSpeed ? "#22c55e" : "#ef4444"));
     }
 
+    private StackPane buildMotorHealthTile() {
+        Label title = new Label("Motor Health");
+        title.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 700;");
+        motorHealthSummaryLabel.setStyle("-fx-text-fill: #f8fafc; -fx-font-weight: 800; -fx-font-size: 18;");
+        motorDisconnectedLabel.setStyle("-fx-text-fill: #cbd5e1; -fx-font-size: 13;");
+        motorHotLabel.setStyle("-fx-text-fill: #cbd5e1; -fx-font-size: 13;");
+
+        Label thresholdLabel = new Label(String.format("Hot threshold: %.4f C", MOTOR_TOO_HOT_THRESHOLD_C));
+        thresholdLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12;");
+
+        VBox content = new VBox(8, title, motorHealthSummaryLabel, motorDisconnectedLabel, motorHotLabel, thresholdLabel);
+        content.setAlignment(Pos.CENTER_LEFT);
+
+        StackPane tile = new StackPane(content);
+        tile.setPadding(new Insets(10));
+        tile.setStyle("""
+            -fx-background-color: #0f172a;
+            -fx-background-radius: 16;
+            -fx-border-color: #1f2a44;
+            -fx-border-radius: 16;
+        """);
+        return tile;
+    }
+
+    private StackPane buildRoboRioHealthTile() {
+        Label title = new Label("roboRIO Health");
+        title.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 700;");
+        roboRioHealthSummaryLabel.setStyle("-fx-text-fill: #f8fafc; -fx-font-weight: 800; -fx-font-size: 18;");
+        roboRioRestartLabel.setWrapText(true);
+        roboRioPowerLabel.setWrapText(true);
+        roboRioRailsLabel.setWrapText(true);
+        roboRioRestartLabel.setStyle("-fx-text-fill: #f8fafc; -fx-font-size: 12;");
+        roboRioPowerLabel.setStyle("-fx-text-fill: #f8fafc; -fx-font-size: 12;");
+        roboRioRailsLabel.setStyle("-fx-text-fill: #f8fafc; -fx-font-size: 12;");
+
+        VBox content = new VBox(8, title, roboRioHealthSummaryLabel, roboRioRestartLabel, roboRioPowerLabel, roboRioRailsLabel);
+        content.setAlignment(Pos.CENTER_LEFT);
+        content.setFillWidth(true);
+
+        StackPane tile = new StackPane(content);
+        tile.setPadding(new Insets(10));
+        tile.setStyle("""
+            -fx-background-color: #0f172a;
+            -fx-background-radius: 16;
+            -fx-border-color: #1f2a44;
+            -fx-border-radius: 16;
+        """);
+        return tile;
+    }
+
+    private void updateMotorHealth() {
+        tooHotThresholdPub.set(MOTOR_TOO_HOT_THRESHOLD_C);
+
+        List<String> disconnectedMotors = new ArrayList<>();
+        List<String> hotMotors = new ArrayList<>();
+
+        for (String motorName : motorHealthTable.getSubTables()) {
+            NetworkTable motorTable = motorHealthTable.getSubTable(motorName);
+            boolean connected = motorTable.getEntry("Connected").getBoolean(false);
+            double tempC = motorTable.getEntry("TempC").getDouble(0.0);
+            boolean tooHot = tempC > MOTOR_TOO_HOT_THRESHOLD_C;
+
+            if (!connected) {
+                disconnectedMotors.add(motorName);
+            }
+            if (tooHot) {
+                hotMotors.add(String.format("%s (%.1f C)", motorName, tempC));
+            }
+
+            motorTable.getEntry("TooHot").setBoolean(tooHot);
+        }
+
+        boolean allConnected = disconnectedMotors.isEmpty();
+        boolean allCool = hotMotors.isEmpty();
+        boolean healthy = allConnected && allCool;
+
+        allConnectedPub.set(allConnected);
+        allCoolPub.set(allCool);
+        healthyPub.set(healthy);
+        disconnectedMotorsPub.set(disconnectedMotors.toArray(String[]::new));
+        hotMotorsPub.set(hotMotors.toArray(String[]::new));
+
+        String status;
+        if (healthy) {
+            status = "HEALTHY";
+        } else if (!allConnected && !allCool) {
+            status = "DISCONNECTED + HOT";
+        } else if (!allConnected) {
+            status = "DISCONNECTED";
+        } else {
+            status = "TOO HOT";
+        }
+        overallStatusPub.set(status);
+
+        motorHealthSummaryLabel.setText(status);
+        motorHealthSummaryLabel.setStyle(String.format(
+            "-fx-text-fill: %s; -fx-font-weight: 800; -fx-font-size: 18;",
+            healthy ? "#22c55e" : "#ef4444"
+        ));
+        motorDisconnectedLabel.setText(
+            disconnectedMotors.isEmpty()
+                ? "Disconnected: none"
+                : "Disconnected: " + String.join(", ", disconnectedMotors)
+        );
+        motorHotLabel.setText(
+            hotMotors.isEmpty()
+                ? "Hot motors: none"
+                : "Hot motors: " + String.join(", ", hotMotors)
+        );
+    }
+
+    private void updateRoboRioHealth() {
+        boolean rebootedRecently = roboRioHealthTable.getEntry("RebootedRecently").getBoolean(false);
+        boolean brownedOut = roboRioHealthTable.getEntry("BrownedOut").getBoolean(false);
+        double batteryVoltage = roboRioHealthTable.getEntry("BatteryVoltage").getDouble(0.0);
+        double inputVoltage = roboRioHealthTable.getEntry("InputVoltage").getDouble(0.0);
+        double inputCurrent = roboRioHealthTable.getEntry("InputCurrent").getDouble(0.0);
+        double brownoutVoltage = roboRioHealthTable.getEntry("BrownoutVoltage").getDouble(0.0);
+        boolean systemActive = roboRioHealthTable.getEntry("SystemActive").getBoolean(true);
+        double commsDisableCount = roboRioHealthTable.getEntry("CommsDisableCount").getDouble(0.0);
+        boolean enabled3V3 = roboRioHealthTable.getEntry("Enabled3V3").getBoolean(true);
+        boolean enabled5V = roboRioHealthTable.getEntry("Enabled5V").getBoolean(true);
+        boolean enabled6V = roboRioHealthTable.getEntry("Enabled6V").getBoolean(true);
+        double faultCount3V3 = roboRioHealthTable.getEntry("FaultCount3V3").getDouble(0.0);
+        double faultCount5V = roboRioHealthTable.getEntry("FaultCount5V").getDouble(0.0);
+        double faultCount6V = roboRioHealthTable.getEntry("FaultCount6V").getDouble(0.0);
+        double cpuTempC = roboRioHealthTable.getEntry("CPUTempC").getDouble(0.0);
+
+        List<String> issues = new ArrayList<>();
+        if (rebootedRecently) {
+            issues.add("RIO rebooted recently");
+        }
+        if (brownedOut) {
+            issues.add("Brownout detected");
+        }
+        if (!systemActive) {
+            issues.add("System inactive");
+        }
+        if (!enabled3V3) {
+            issues.add("3.3V rail disabled");
+        }
+        if (!enabled5V) {
+            issues.add("5V rail disabled");
+        }
+        if (!enabled6V) {
+            issues.add("6V rail disabled");
+        }
+        if (faultCount3V3 > 0.0) {
+            issues.add(String.format("3.3V rail faults %.0f", faultCount3V3));
+        }
+        if (faultCount5V > 0.0) {
+            issues.add(String.format("5V rail faults %.0f", faultCount5V));
+        }
+        if (faultCount6V > 0.0) {
+            issues.add(String.format("6V rail faults %.0f", faultCount6V));
+        }
+        if (batteryVoltage > 0.0 && brownoutVoltage > 0.0 && batteryVoltage <= brownoutVoltage) {
+            issues.add(String.format("Battery at brownout %.2fV", batteryVoltage));
+        }
+
+        boolean healthy = issues.isEmpty();
+        String status = healthy ? "HEALTHY" : String.join(" | ", issues);
+        roboRioHealthyPub.set(healthy);
+        roboRioStatusPub.set(status);
+
+        roboRioHealthSummaryLabel.setText(healthy ? "HEALTHY" : "CHECK RIO");
+        roboRioHealthSummaryLabel.setStyle(String.format(
+            "-fx-text-fill: %s; -fx-font-weight: 800; -fx-font-size: 18;",
+            healthy ? "#22c55e" : "#ef4444"
+        ));
+        roboRioRestartLabel.setText(String.format(
+            "Rebooted Recently: %s\n" +
+            "Browned Out: %s\n" +
+            "System Active: %s\n" +
+            "Comms Disable Count: %.0f",
+            rebootedRecently, brownedOut, systemActive, commsDisableCount
+        ));
+        roboRioPowerLabel.setText(String.format(
+            "Battery Voltage: %.2f V\n" +
+            "Input Voltage: %.2f V\n" +
+            "Input Current: %.1f A\n" +
+            "Brownout Voltage: %.2f V\n" +
+            "CPU Temp: %.1f C",
+            batteryVoltage, inputVoltage, inputCurrent, brownoutVoltage, cpuTempC
+        ));
+        roboRioRailsLabel.setText(String.format(
+            "3.3V Enabled: %s | Faults: %.0f\n" +
+            "5V Enabled: %s | Faults: %.0f\n" +
+            "6V Enabled: %s | Faults: %.0f",
+            enabled3V3, faultCount3V3,
+            enabled5V, faultCount5V,
+            enabled6V, faultCount6V
+        ));
+    }
+
     private String formatSecondsFloor(double seconds) {
         int totalSeconds = (int) Math.floor(seconds);
         int mins = totalSeconds / 60;
@@ -1160,24 +1914,28 @@ public final class DashboardView {
         shooterBoostSlider.valueProperty().addListener((obs, oldV, newV) -> {
             double boostRpm = newV.doubleValue();
             boostValueLabel.setText(String.format("Boost: %s RPM", formatSignedRpm(boostRpm)));
-            shooterBoostCmd.set(boostRpm);
+            if (!suppressDashboardPublishing) {
+                shooterBoostCmd.set(boostRpm);
+            }
         });
         shooterBoostCmd.set(shooterBoostSlider.getValue());
 
-        Button boostDown = new Button("-200");
-        Button boostUp = new Button("+200");
-        styleBoostButton(boostDown, "#7f1d1d", "#ef4444", "#991b1b");
-        styleBoostButton(boostUp, "#14532d", "#22c55e", "#166534");
-        boostDown.setOnAction(e -> {
-            playClickAnimation(boostDown);
+        shooterBoostDownButton = new Button("-200");
+        shooterBoostUpButton = new Button("+200");
+        styleBoostButton(shooterBoostDownButton, "#7f1d1d", "#ef4444", "#991b1b");
+        styleBoostButton(shooterBoostUpButton, "#14532d", "#22c55e", "#166534");
+        shooterBoostDownButton.setOnAction(e -> {
+            playClickAnimation(shooterBoostDownButton);
+            markReplayEvent("boostDown");
             adjustBoostBy(-200.0);
         });
-        boostUp.setOnAction(e -> {
-            playClickAnimation(boostUp);
+        shooterBoostUpButton.setOnAction(e -> {
+            playClickAnimation(shooterBoostUpButton);
+            markReplayEvent("boostUp");
             adjustBoostBy(200.0);
         });
 
-        HBox boostButtons = new HBox(10, boostDown, boostUp);
+        HBox boostButtons = new HBox(10, shooterBoostDownButton, shooterBoostUpButton);
         boostButtons.setAlignment(Pos.CENTER);
 
         VBox content = new VBox(8, title, boostValueLabel, shooterBoostSlider, boostButtons);
@@ -1300,6 +2058,10 @@ public final class DashboardView {
             appendLog(otherLabel + " false");
         }
 
+        String replayEventId = replayEventIdFor(currentLabel);
+        if (replayEventId != null) {
+            markReplayEvent(replayEventId);
+        }
         currentPublisher.set(selected);
         updateToggleTileStyle(currentButton, selected);
         appendLog(currentLabel + (selected ? " true" : " false"));
@@ -1323,67 +2085,69 @@ public final class DashboardView {
 
         Label rpmLabel = new Label("Shooter RPM");
         rpmLabel.setStyle("-fx-text-fill: #cbd5e1; -fx-font-weight: 700;");
-        TextField rpmField = new TextField();
-        rpmField.setPromptText("Type RPM (ex: 3200)");
-        styleInputField(rpmField);
+        shooterRpmField = new TextField();
+        shooterRpmField.setPromptText("Type RPM (ex: 3200)");
+        styleInputField(shooterRpmField);
 
         Label rpmSliderLabel = new Label("RPM Slider");
         rpmSliderLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 700;");
-        Slider rpmSlider = new Slider(0.0, 6000.0, 0.0);
-        rpmSlider.setShowTickMarks(true);
-        rpmSlider.setShowTickLabels(true);
-        rpmSlider.setMajorTickUnit(1000.0);
-        rpmSlider.setMinorTickCount(4);
-        rpmSlider.setBlockIncrement(50.0);
-        rpmSlider.setPrefWidth(260);
-        Label rpmSliderValue = new Label("Slider: 0 RPM");
-        rpmSliderValue.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
+        shooterRpmSlider = new Slider(0.0, 6000.0, 0.0);
+        shooterRpmSlider.setShowTickMarks(true);
+        shooterRpmSlider.setShowTickLabels(true);
+        shooterRpmSlider.setMajorTickUnit(1000.0);
+        shooterRpmSlider.setMinorTickCount(4);
+        shooterRpmSlider.setBlockIncrement(50.0);
+        shooterRpmSlider.setPrefWidth(260);
+        shooterRpmSliderValueLabel = new Label("Slider: 0 RPM");
+        shooterRpmSliderValueLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
 
         Label hoodLabel = new Label("Hood Setpoint (deg)");
         hoodLabel.setStyle("-fx-text-fill: #cbd5e1; -fx-font-weight: 700;");
-        TextField hoodField = new TextField();
-        hoodField.setPromptText("Type angle (ex: 25)");
-        styleInputField(hoodField);
+        hoodSetpointField = new TextField();
+        hoodSetpointField.setPromptText("Type angle (ex: 25)");
+        styleInputField(hoodSetpointField);
 
         Label hoodSliderLabel = new Label("Hood Slider");
         hoodSliderLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 700;");
-        Slider hoodSlider = new Slider(0.0, 90.0, 0.0);
-        hoodSlider.setShowTickMarks(true);
-        hoodSlider.setShowTickLabels(true);
-        hoodSlider.setMajorTickUnit(15.0);
-        hoodSlider.setMinorTickCount(2);
-        hoodSlider.setBlockIncrement(1.0);
-        hoodSlider.setPrefWidth(260);
-        Label hoodSliderValue = new Label("Slider: 0 deg");
-        hoodSliderValue.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
+        hoodSetpointSlider = new Slider(0.0, 90.0, 0.0);
+        hoodSetpointSlider.setShowTickMarks(true);
+        hoodSetpointSlider.setShowTickLabels(true);
+        hoodSetpointSlider.setMajorTickUnit(15.0);
+        hoodSetpointSlider.setMinorTickCount(2);
+        hoodSetpointSlider.setBlockIncrement(1.0);
+        hoodSetpointSlider.setPrefWidth(260);
+        hoodSliderValueLabel = new Label("Slider: 0 deg");
+        hoodSliderValueLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
 
-        Label rpmStatus = new Label("Last sent: -- RPM");
-        rpmStatus.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
-        Label hoodStatus = new Label("Last sent: -- deg");
-        hoodStatus.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
+        shooterRpmStatusLabel = new Label("Last sent: -- RPM");
+        shooterRpmStatusLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
+        hoodSetpointStatusLabel = new Label("Last sent: -- deg");
+        hoodSetpointStatusLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-weight: 600;");
 
-        Label errorLabel = new Label();
-        errorLabel.setStyle("-fx-text-fill: #ef4444; -fx-font-weight: 700;");
+        shooterControlErrorLabel = new Label();
+        shooterControlErrorLabel.setStyle("-fx-text-fill: #ef4444; -fx-font-weight: 700;");
 
-        Button sendButton = new Button("Send Setpoints");
-        sendButton.setOnAction(e -> {
-            String rpmText = rpmField.getText();
+        shooterSendSetpointsButton = new Button("Send Setpoints");
+        shooterSendSetpointsButton.setOnAction(e -> {
+            playClickAnimation(shooterSendSetpointsButton);
+            markReplayEvent("sendSetpoints");
+            String rpmText = shooterRpmField.getText();
             boolean hasRpm = rpmText != null && !rpmText.isBlank();
             double rpm = Double.NaN;
 
             if (hasRpm) {
-                rpm = parseDoubleOrWarn(rpmText, "RPM", errorLabel);
+                rpm = parseDoubleOrWarn(rpmText, "RPM", shooterControlErrorLabel);
                 if (Double.isNaN(rpm)) return;
             }
 
-            double hoodDeg = parseDoubleOrWarn(hoodField.getText(), "Hood angle", errorLabel);
+            double hoodDeg = parseDoubleOrWarn(hoodSetpointField.getText(), "Hood angle", shooterControlErrorLabel);
             if (Double.isNaN(hoodDeg)) return;
 
             if (hasRpm) {
                 double boostRpm = shooterBoostSlider != null ? shooterBoostSlider.getValue() : 0.0;
                 double boostedRpm = rpm + boostRpm;
                 shooterTargetCmd.set(boostedRpm);
-                rpmStatus.setText(String.format(
+                shooterRpmStatusLabel.setText(String.format(
                     "Last sent: %.0f RPM (boost %s RPM -> %.0f RPM)",
                     rpm,
                     formatSignedRpm(boostRpm),
@@ -1401,12 +2165,12 @@ public final class DashboardView {
             }
 
             hoodSetpointCmd.set(hoodDeg);
-            hoodStatus.setText(String.format("Last sent: %.1f deg", hoodDeg));
-            errorLabel.setText("");
+            hoodSetpointStatusLabel.setText(String.format("Last sent: %.1f deg", hoodDeg));
+            shooterControlErrorLabel.setText("");
         });
-        sendButton.setPadding(new Insets(10, 18, 10, 18));
-        sendButton.setCursor(Cursor.HAND);
-        sendButton.setStyle("""
+        shooterSendSetpointsButton.setPadding(new Insets(10, 18, 10, 18));
+        shooterSendSetpointsButton.setCursor(Cursor.HAND);
+        shooterSendSetpointsButton.setStyle("""
             -fx-background-color: #1d4ed8;
             -fx-background-radius: 10;
             -fx-text-fill: #f8fafc;
@@ -1415,59 +2179,59 @@ public final class DashboardView {
         """);
 
         boolean[] updatingRpm = {false};
-        rpmSlider.valueProperty().addListener((obs, oldV, newV) -> {
+        shooterRpmSlider.valueProperty().addListener((obs, oldV, newV) -> {
             if (updatingRpm[0]) return;
             updatingRpm[0] = true;
             double value = newV.doubleValue();
-            rpmField.setText(String.format("%.0f", value));
-            rpmSliderValue.setText(String.format("Slider: %.0f RPM", value));
+            shooterRpmField.setText(String.format("%.0f", value));
+            shooterRpmSliderValueLabel.setText(String.format("Slider: %.0f RPM", value));
             updatingRpm[0] = false;
         });
-        rpmField.textProperty().addListener((obs, oldV, newV) -> {
+        shooterRpmField.textProperty().addListener((obs, oldV, newV) -> {
             if (updatingRpm[0]) return;
             if (newV == null || newV.isBlank()) {
-                rpmSliderValue.setText("Slider: 0 RPM");
+                shooterRpmSliderValueLabel.setText("Slider: 0 RPM");
                 return;
             }
             try {
                 double value = Double.parseDouble(newV.trim());
-                double clamped = Math.max(rpmSlider.getMin(), Math.min(rpmSlider.getMax(), value));
+                double clamped = Math.max(shooterRpmSlider.getMin(), Math.min(shooterRpmSlider.getMax(), value));
                 updatingRpm[0] = true;
-                rpmSlider.setValue(clamped);
-                rpmSliderValue.setText(String.format("Slider: %.0f RPM", clamped));
+                shooterRpmSlider.setValue(clamped);
+                shooterRpmSliderValueLabel.setText(String.format("Slider: %.0f RPM", clamped));
                 updatingRpm[0] = false;
             } catch (NumberFormatException ignored) {
             }
         });
 
         boolean[] updatingHood = {false};
-        hoodSlider.valueProperty().addListener((obs, oldV, newV) -> {
+        hoodSetpointSlider.valueProperty().addListener((obs, oldV, newV) -> {
             if (updatingHood[0]) return;
             updatingHood[0] = true;
             double value = newV.doubleValue();
-            hoodField.setText(String.format("%.1f", value));
-            hoodSliderValue.setText(String.format("Slider: %.1f deg", value));
+            hoodSetpointField.setText(String.format("%.1f", value));
+            hoodSliderValueLabel.setText(String.format("Slider: %.1f deg", value));
             updatingHood[0] = false;
         });
-        hoodField.textProperty().addListener((obs, oldV, newV) -> {
+        hoodSetpointField.textProperty().addListener((obs, oldV, newV) -> {
             if (updatingHood[0]) return;
             if (newV == null || newV.isBlank()) {
-                hoodSliderValue.setText("Slider: 0 deg");
+                hoodSliderValueLabel.setText("Slider: 0 deg");
                 return;
             }
             try {
                 double value = Double.parseDouble(newV.trim());
-                double clamped = Math.max(hoodSlider.getMin(), Math.min(hoodSlider.getMax(), value));
+                double clamped = Math.max(hoodSetpointSlider.getMin(), Math.min(hoodSetpointSlider.getMax(), value));
                 updatingHood[0] = true;
-                hoodSlider.setValue(clamped);
-                hoodSliderValue.setText(String.format("Slider: %.1f deg", clamped));
+                hoodSetpointSlider.setValue(clamped);
+                hoodSliderValueLabel.setText(String.format("Slider: %.1f deg", clamped));
                 updatingHood[0] = false;
             } catch (NumberFormatException ignored) {
             }
         });
 
-        rpmField.setOnAction(e -> sendButton.fire());
-        hoodField.setOnAction(e -> sendButton.fire());
+        shooterRpmField.setOnAction(e -> shooterSendSetpointsButton.fire());
+        hoodSetpointField.setOnAction(e -> shooterSendSetpointsButton.fire());
 
         GridPane grid = new GridPane();
         grid.setHgap(12);
@@ -1478,44 +2242,47 @@ public final class DashboardView {
         col2.setHgrow(Priority.ALWAYS);
         grid.getColumnConstraints().addAll(col1, col2);
         grid.add(rpmLabel, 0, 0);
-        grid.add(rpmField, 1, 0);
+        grid.add(shooterRpmField, 1, 0);
         grid.add(rpmSliderLabel, 0, 1);
-        grid.add(new VBox(4, rpmSlider, rpmSliderValue), 1, 1);
+        grid.add(new VBox(4, shooterRpmSlider, shooterRpmSliderValueLabel), 1, 1);
         grid.add(hoodLabel, 0, 2);
-        grid.add(hoodField, 1, 2);
+        grid.add(hoodSetpointField, 1, 2);
         grid.add(hoodSliderLabel, 0, 3);
-        grid.add(new VBox(4, hoodSlider, hoodSliderValue), 1, 3);
+        grid.add(new VBox(4, hoodSetpointSlider, hoodSliderValueLabel), 1, 3);
 
-        Button spindexerStartButton = new Button("Start Spindexer");
+        spindexerStartButton = new Button("Start Spindexer");
         spindexerStartButton.setOnAction(e -> {
             playClickAnimation(spindexerStartButton);
+            markReplayEvent("spindexerStart");
             spindexerReverseCmd.set(false);
             spindexerCmd.set(true);
             appendLog("Spindexer set true");
         });
         styleActionButton(spindexerStartButton);
 
-        Button spindexerReverseButton = new Button("Reverse Spindexer");
-        spindexerReverseButton.setOnAction(e -> {
-            playClickAnimation(spindexerReverseButton);
+        spindexerControlReverseButton = new Button("Reverse Spindexer");
+        spindexerControlReverseButton.setOnAction(e -> {
+            playClickAnimation(spindexerControlReverseButton);
+            markReplayEvent("spindexerControlReverse");
             spindexerCmd.set(false);
             spindexerReverseCmd.set(true);
             appendLog("Spindexer reverse set true");
         });
-        styleActionButton(spindexerReverseButton);
+        styleActionButton(spindexerControlReverseButton);
 
-        Button spindexerStopButton = new Button("Stop Spindexer");
+        spindexerStopButton = new Button("Stop Spindexer");
         spindexerStopButton.setOnAction(e -> {
             playClickAnimation(spindexerStopButton);
+            markReplayEvent("spindexerStop");
             spindexerCmd.set(false);
             spindexerReverseCmd.set(false);
             appendLog("Spindexer set false");
         });
         styleActionButton(spindexerStopButton);
 
-        HBox spindexerRow = new HBox(10, spindexerStartButton, spindexerReverseButton, spindexerStopButton);
+        HBox spindexerRow = new HBox(10, spindexerStartButton, spindexerControlReverseButton, spindexerStopButton);
 
-        VBox card = new VBox(12, title, grid, sendButton, errorLabel, rpmStatus, hoodStatus, spindexerRow);
+        VBox card = new VBox(12, title, grid, shooterSendSetpointsButton, shooterControlErrorLabel, shooterRpmStatusLabel, hoodSetpointStatusLabel, spindexerRow);
         card.setPadding(new Insets(18));
         card.setMaxWidth(520);
         card.setStyle("""
@@ -1613,7 +2380,12 @@ public final class DashboardView {
         if (fieldImageView == null || fieldLayer == null || robotMarker == null) return;
 
         String alliance = allianceSub != null ? allianceSub.get().trim() : "Red";
-        boolean isBlue = alliance.equalsIgnoreCase("Blue");
+        double[] pose = readCurrentPose();
+        double[] gamePieces = gamePieceSub != null ? gamePieceSub.get() : new double[0];
+        renderFieldState(alliance, pose[0], pose[1], pose[2], gamePieces);
+    }
+
+    private void renderFieldState(String alliance, double poseX, double poseY, double poseDeg, double[] gamePieces) {
         boolean isRed = alliance.equalsIgnoreCase("Red");
 
         if (fieldFullImage != null && fieldImageView.getImage() != fieldFullImage) {
@@ -1632,25 +2404,6 @@ public final class DashboardView {
             lastFieldW = fieldW;
             lastFieldH = fieldH;
             appendLog(String.format("Field image size: %.0f x %.0f px", fieldW, fieldH));
-        }
-
-        double poseX = 0.0;
-        double poseY = 0.0;
-        double poseDeg = 0.0;
-
-        TimestampedObject<Pose2d> atomic = poseSub != null ? poseSub.getAtomic() : null;
-        if (atomic != null && atomic.timestamp != 0) {
-            Pose2d pose = atomic.value;
-            poseX = pose.getX();
-            poseY = pose.getY();
-            poseDeg = pose.getRotation().getDegrees();
-        } else if (poseArraySub != null) {
-            double[] arr = poseArraySub.get();
-            if (arr.length >= 3) {
-                poseX = arr[0];
-                poseY = arr[1];
-                poseDeg = arr[2];
-            }
         }
 
         if (isRed && FLIP_POSE_FOR_RED) {
@@ -1682,12 +2435,11 @@ public final class DashboardView {
         robotMarker.setLayoutY(yPx - size / 2.0);
         robotMarker.setRotate(poseDeg);
 
-        updateGamePieces(fieldW, fieldH, pixelsPerMeter);
+        updateGamePieces(fieldW, fieldH, pixelsPerMeter, gamePieces);
     }
 
-    private void updateGamePieces(double fieldW, double fieldH, double pixelsPerMeter) {
-        if (gamePieceLayer == null || gamePieceSub == null) return;
-        double[] arr = gamePieceSub.get();
+    private void updateGamePieces(double fieldW, double fieldH, double pixelsPerMeter, double[] arr) {
+        if (gamePieceLayer == null) return;
         int count = arr.length / 2;
 
         while (gamePieceMarkers.size() < count) {

@@ -80,12 +80,19 @@ public final class DoubleTopicTile extends VBox {
 
     public void update() {
         if (sub == null) return;
-        double v = sub.get();
-        valueLabel.setText(formatter.apply(v));
+        showValue(getCurrentValue());
     }
 
     public String getTopicPath() {
         return topicPath;
+    }
+
+    public double getCurrentValue() {
+        return sub != null ? sub.get() : 0.0;
+    }
+
+    public void showValue(double value) {
+        valueLabel.setText(formatter.apply(value));
     }
 
     private ContextMenu buildContextMenu(double defaultValue) {

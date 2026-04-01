@@ -87,12 +87,19 @@ public final class StringTopicTile extends VBox {
 
     public void update() {
         if (sub == null) return;
-        String v = sub.get();
-        valueLabel.setText(formatter.apply(v));
+        showValue(getCurrentValue());
     }
 
     public String getTopicPath() {
         return topicPath;
+    }
+
+    public String getCurrentValue() {
+        return sub != null ? sub.get() : defaultValue;
+    }
+
+    public void showValue(String value) {
+        valueLabel.setText(formatter.apply(value));
     }
 
     private ContextMenu buildContextMenu() {

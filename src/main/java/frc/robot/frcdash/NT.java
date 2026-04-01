@@ -36,6 +36,10 @@ public final class NT {
         return inst.getStringTopic(topic).subscribe(defaultVal);
     }
 
+    public static StringArraySubscriber subStringArray(String topic, String[] defaultVal) {
+        return inst.getStringArrayTopic(topic).subscribe(defaultVal);
+    }
+
     public static BooleanPublisher pubBool(String topic) {
         return inst.getBooleanTopic(topic).publish();
     }
@@ -46,6 +50,10 @@ public final class NT {
 
     public static DoublePublisher pubDouble(String topic) {
         return inst.getDoubleTopic(topic).publish();
+    }
+
+    public static StringArrayPublisher pubStringArray(String topic) {
+        return inst.getStringArrayTopic(topic).publish();
     }
 
     public static void onConnectionChange(Consumer<Boolean> cb) {
