@@ -12,6 +12,7 @@ import edu.wpi.first.networktables.StringSubscriber;
 import edu.wpi.first.networktables.StructSubscriber;
 import edu.wpi.first.networktables.TimestampedObject;
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.util.WPIUtilJNI;
 import frc.robot.frcdash.ui.BooleanTopicTile;
 import frc.robot.frcdash.ui.DoubleTopicTile;
 import frc.robot.frcdash.ui.StringTopicTile;
@@ -77,6 +78,7 @@ public final class DashboardView {
     private static final boolean INVERT_Y = false;
     private static final double SHOOTER_RPM_TOLERANCE = 50.0;
     private static final double MOTOR_TOO_HOT_THRESHOLD_C = 54.4444444444;
+    private static final long MOTOR_HEALTH_STALE_MICROS = 1_500_000L;
 
     private final BorderPane root = new BorderPane();
     private final StackPane tabContent = new StackPane();
@@ -162,6 +164,8 @@ public final class DashboardView {
     private final Label roboRioPowerLabel = new Label("Power: --");
     private final Label roboRioRailsLabel = new Label("Rails: --");
     private final Label replayStatusLabel = new Label("Replay idle");
+    private final List<String> latestMotorHealthIssues = new ArrayList<>();
+    private final List<String> latestRoboRioIssues = new ArrayList<>();
     private javafx.stage.Stage logStage;
     private Button recordReplayButton;
     private Button stopRecordReplayButton;
@@ -1570,6 +1574,8 @@ public final class DashboardView {
             -fx-border-color: #1f2a44;
             -fx-border-radius: 16;
         """);
+        tile.setCursor(Cursor.HAND);
+        tile.setOnMouseClicked(e -> showHealthDetails("Motor Health Details", latestMotorHealthIssues));
         return tile;
     }
 
@@ -1596,6 +1602,8 @@ public final class DashboardView {
             -fx-border-color: #1f2a44;
             -fx-border-radius: 16;
         """);
+        tile.setCursor(Cursor.HAND);
+        tile.setOnMouseClicked(e -> showHealthDetails("roboRIO Health Details", latestRoboRioIssues));
         return tile;
     }
 
@@ -1604,26 +1612,89 @@ public final class DashboardView {
 
         List<String> disconnectedMotors = new ArrayList<>();
         List<String> hotMotors = new ArrayList<>();
+        latestMotorHealthIssues.clear();
+        long nowMicros = WPIUtilJNI.now();
+        boolean sawAnyMotorSubtable = false;
 
         for (String motorName : motorHealthTable.getSubTables()) {
+            sawAnyMotorSubtable = true;
             NetworkTable motorTable = motorHealthTable.getSubTable(motorName);
-            boolean connected = motorTable.getEntry("Connected").getBoolean(false);
-            double tempC = motorTable.getEntry("TempC").getDouble(0.0);
+            String displayName = motorTable.getEntry("Name").getString(motorName);
+            var connectedEntry = motorTable.getEntry("Connected");
+            var tempEntry = motorTable.getEntry("TempC");
+            boolean connected = connectedEntry.getBoolean(false);
+            long connectedAgeMicros = connectedEntry.getLastChange() == 0 ? Long.MAX_VALUE : (nowMicros - connectedEntry.getLastChange());
+            long tempAgeMicros = tempEntry.getLastChange() == 0 ? Long.MAX_VALUE : (nowMicros - tempEntry.getLastChange());
+            boolean stale = connectedAgeMicros > MOTOR_HEALTH_STALE_MICROS || tempAgeMicros > MOTOR_HEALTH_STALE_MICROS;
+            if (stale) {
+                connected = false;
+            }
+            double tempC = tempEntry.getDouble(0.0);
             boolean tooHot = tempC > MOTOR_TOO_HOT_THRESHOLD_C;
 
             if (!connected) {
-                disconnectedMotors.add(motorName);
+                disconnectedMotors.add(displayName);
+                latestMotorHealthIssues.add(stale
+                    ? displayName + ": no recent NetworkTables updates"
+                    : displayName + ": Connected=false");
             }
             if (tooHot) {
-                hotMotors.add(String.format("%s (%.1f C)", motorName, tempC));
+                hotMotors.add(String.format("%s (%.1f C)", displayName, tempC));
+                latestMotorHealthIssues.add(String.format("%s: temp %.1f C exceeds %.4f C", displayName, tempC, MOTOR_TOO_HOT_THRESHOLD_C));
             }
 
             motorTable.getEntry("TooHot").setBoolean(tooHot);
         }
 
-        boolean allConnected = disconnectedMotors.isEmpty();
-        boolean allCool = hotMotors.isEmpty();
-        boolean healthy = allConnected && allCool;
+        String[] publishedDisconnected = motorHealthTable.getEntry("DisconnectedMotorsList").getStringArray(new String[0]);
+        if (publishedDisconnected.length == 0) {
+            publishedDisconnected = motorHealthTable.getEntry("DisconnectedMotors").getStringArray(new String[0]);
+        }
+        String[] publishedHot = motorHealthTable.getEntry("HotMotors").getStringArray(new String[0]);
+        boolean hasPublishedDisconnected = publishedDisconnected.length > 0;
+        boolean hasPublishedHot = publishedHot.length > 0;
+        boolean publishedAllConnected = motorHealthTable.getEntry("AllConnected").getBoolean(disconnectedMotors.isEmpty());
+        boolean publishedAllCool = motorHealthTable.getEntry("AllCool").getBoolean(hotMotors.isEmpty());
+        boolean publishedHealthy = motorHealthTable.getEntry("Healthy").getBoolean(disconnectedMotors.isEmpty() && hotMotors.isEmpty());
+        String publishedOverallStatus = motorHealthTable.getEntry("OverallStatus").getString("");
+
+        boolean allConnected;
+        boolean allCool;
+        boolean healthy;
+
+        if (!sawAnyMotorSubtable || !publishedOverallStatus.isBlank() || hasPublishedDisconnected || hasPublishedHot) {
+            disconnectedMotors = new ArrayList<>(Arrays.asList(publishedDisconnected));
+            hotMotors = new ArrayList<>(Arrays.asList(publishedHot));
+            allConnected = publishedAllConnected;
+            allCool = publishedAllCool;
+            healthy = publishedHealthy;
+            latestMotorHealthIssues.clear();
+            if (!allConnected) {
+                if (disconnectedMotors.isEmpty()) {
+                    latestMotorHealthIssues.add("AllConnected is false, but DisconnectedMotors is empty.");
+                } else {
+                    for (String name : disconnectedMotors) {
+                        latestMotorHealthIssues.add(name + ": reported disconnected");
+                    }
+                }
+            }
+            if (!allCool) {
+                if (hotMotors.isEmpty()) {
+                    latestMotorHealthIssues.add("AllCool is false, but HotMotors is empty.");
+                } else {
+                    for (String name : hotMotors) {
+                        latestMotorHealthIssues.add(name + ": reported hot");
+                    }
+                }
+            }
+            if (healthy) {
+                latestMotorHealthIssues.add("AllConnected and AllCool are true.");
+            }
+        } else {
+            allConnected = disconnectedMotors.isEmpty();
+            allCool = hotMotors.isEmpty();
+            healthy = allConnected && allCool;
+        }
 
         allConnectedPub.set(allConnected);
         allCoolPub.set(allCool);
@@ -1634,6 +1705,9 @@ public final class DashboardView {
         String status;
         if (healthy) {
             status = "HEALTHY";
+            if (latestMotorHealthIssues.isEmpty()) {
+                latestMotorHealthIssues.add("All motors connected and below the hot threshold.");
+            }
         } else if (!allConnected && !allCool) {
             status = "DISCONNECTED + HOT";
         } else if (!allConnected) {
@@ -1678,41 +1752,59 @@ public final class DashboardView {
         double cpuTempC = roboRioHealthTable.getEntry("CPUTempC").getDouble(0.0);
 
         List<String> issues = new ArrayList<>();
+        latestRoboRioIssues.clear();
         if (rebootedRecently) {
             issues.add("RIO rebooted recently");
+            latestRoboRioIssues.add("RebootedRecently is true: the roboRIO likely restarted.");
         }
         if (brownedOut) {
             issues.add("Brownout detected");
+            latestRoboRioIssues.add("BrownedOut is true: the roboRIO hit a low-voltage brownout.");
         }
         if (!systemActive) {
             issues.add("System inactive");
+            latestRoboRioIssues.add("SystemActive is false: the roboRIO reports the system is not active.");
         }
         if (!enabled3V3) {
             issues.add("3.3V rail disabled");
+            latestRoboRioIssues.add("Enabled3V3 is false: the 3.3V rail is disabled.");
         }
         if (!enabled5V) {
             issues.add("5V rail disabled");
+            latestRoboRioIssues.add("Enabled5V is false: the 5V rail is disabled.");
         }
         if (!enabled6V) {
             issues.add("6V rail disabled");
+            latestRoboRioIssues.add("Enabled6V is false: the 6V rail is disabled.");
         }
         if (faultCount3V3 > 0.0) {
             issues.add(String.format("3.3V rail faults %.0f", faultCount3V3));
+            latestRoboRioIssues.add(String.format("FaultCount3V3 is %.0f.", faultCount3V3));
         }
         if (faultCount5V > 0.0) {
             issues.add(String.format("5V rail faults %.0f", faultCount5V));
+            latestRoboRioIssues.add(String.format("FaultCount5V is %.0f.", faultCount5V));
         }
         if (faultCount6V > 0.0) {
             issues.add(String.format("6V rail faults %.0f", faultCount6V));
+            latestRoboRioIssues.add(String.format("FaultCount6V is %.0f.", faultCount6V));
         }
         if (batteryVoltage > 0.0 && brownoutVoltage > 0.0 && batteryVoltage <= brownoutVoltage) {
             issues.add(String.format("Battery at brownout %.2fV", batteryVoltage));
+            latestRoboRioIssues.add(String.format(
+                "BatteryVoltage %.2f V is at or below BrownoutVoltage %.2f V.",
+                batteryVoltage,
+                brownoutVoltage
+            ));
         }
 
         boolean healthy = issues.isEmpty();
         String status = healthy ? "HEALTHY" : String.join(" | ", issues);
         roboRioHealthyPub.set(healthy);
         roboRioStatusPub.set(status);
+        if (healthy) {
+            latestRoboRioIssues.add("No roboRIO health checks are currently failing.");
+        }
 
         roboRioHealthSummaryLabel.setText(healthy ? "HEALTHY" : "CHECK RIO");
         roboRioHealthSummaryLabel.setStyle(String.format(
@@ -1742,6 +1834,14 @@ public final class DashboardView {
             enabled5V, faultCount5V,
             enabled6V, faultCount6V
         ));
+    }
+
+    private void showHealthDetails(String title, List<String> issues) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle(title);
+        alert.setHeaderText(title);
+        alert.setContentText(String.join("\n", issues));
+        alert.showAndWait();
     }
 
     private String formatSecondsFloor(double seconds) {
